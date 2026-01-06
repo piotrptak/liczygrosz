@@ -37,6 +37,12 @@
 - **Custom Branding**: Unique LiczyGrosz piggy bank icon
 - **Responsive Layout**: Optimized for various screen sizes
 
+### 🔐 Authentication
+- **Auth0 Universal Login**: Secure, production-ready authentication
+- **Persistent Sessions**: Stay logged in across app restarts
+- **Easy Sign Up/Login**: Hosted login page with email/password support
+- **Future Social Login**: Ready for Google and Facebook integration
+
 ## 🚀 Getting Started
 
 ### Prerequisites
@@ -67,6 +73,40 @@
    - Press `i` for iOS simulator
    - Press `a` for Android emulator
    - Scan QR code with Expo Go app on your physical device
+
+### Auth0 Setup (Required for Authentication)
+
+1. **Create Auth0 Account**
+   - Sign up at [auth0.com](https://auth0.com)
+   - Create a new tenant (e.g., "liczygrosz")
+
+2. **Create Application**
+   - Go to **Applications** → **Create Application**
+   - Name: "LiczyGrosz Mobile"
+   - Type: **Native**
+   - Copy your **Domain** and **Client ID**
+
+3. **Configure Application**
+   - In your application settings, find **Allowed Callback URLs**
+   - Add: `https://auth.expo.io/@your-username/liczygrosz`
+   - Find **Allowed Logout URLs**
+   - Add the same URL: `https://auth.expo.io/@your-username/liczygrosz`
+   - Click **Save Changes**
+
+4. **Update App Configuration**
+   - Open `config/auth0-config.ts`
+   - Replace with your Auth0 credentials:
+   ```typescript
+   export const auth0Config = {
+     domain: 'your-tenant.us.auth0.com',
+     clientId: 'your-client-id',
+   };
+   ```
+
+5. **Enable Sign-ups** (Optional)
+   - Go to **Authentication** → **Database** → **Username-Password-Authentication**
+   - Ensure **"Disable Sign Ups"** is **OFF**
+   - Configure password requirements as needed
 
 ## 📱 Usage
 

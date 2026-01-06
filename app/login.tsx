@@ -5,18 +5,22 @@ import { useLocalization } from '@/context/LocalizationContext';
 import { FontAwesome } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function LoginScreen() {
-    const { signIn } = useAuth();
+    const { signIn, isLoading, error } = useAuth();
     const { t } = useLocalization();
     const router = useRouter();
     const colorScheme = useColorScheme();
     const colors = Colors[colorScheme ?? 'light'];
 
-    const handleLogin = async (provider: 'google' | 'facebook' | 'instagram') => {
-        await signIn(provider);
-        router.replace('/(tabs)');
+    const handleLogin = async () => {
+        try {
+            await signIn();
+            // Navigation will happen automatically when user state changes
+        } catch (err: any) {
+            // Error is handled in AuthContext
+        }
     };
 
     return (
@@ -30,30 +34,36 @@ export default function LoginScreen() {
                 <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{t('login_subtitle')}</Text>
             </View>
 
-            <View style={styles.buttons}>
+            <View style={styles.form}>
+                {/* Error Message */}
+                {error && (
+                    <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
+                )}
+
+                {/* Universal Login Button */}
                 <TouchableOpacity
-                    style={[styles.button, styles.googleButton]}
-                    onPress={() => handleLogin('google')}
+                    style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+                    onPress={handleLogin}
+                    disabled={isLoading}
                 >
-                    <FontAwesome name="google" size={24} color="#DB4437" style={styles.icon} />
-                    <Text style={styles.buttonText}>{t('login_google')}</Text>
+                    {isLoading ? (
+                        <ActivityIndicator color="#fff" />
+                    ) : (
+                        <>
+                            <FontAwesome name="sign-in" size={20} color="#fff" style={{ marginRight: 12 }} />
+                            <Text style={styles.primaryButtonText}>
+                                Sign In / Sign Up
+                            </Text>
+                        </>
+                    )}
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                    style={[styles.button, styles.facebookButton]}
-                    onPress={() => handleLogin('facebook')}
-                >
-                    <FontAwesome name="facebook" size={24} color="#4267B2" style={styles.icon} />
-                    <Text style={[styles.buttonText, { color: '#4267B2' }]}>{t('login_facebook')}</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={[styles.button, styles.instaButton]}
-                    onPress={() => handleLogin('instagram')}
-                >
-                    <FontAwesome name="instagram" size={24} color="#C13584" style={styles.icon} />
-                    <Text style={[styles.buttonText, { color: '#C13584' }]}>{t('login_instagram')}</Text>
-                </TouchableOpacity>
+                <Text style={[styles.infoText, { color: colors.textSecondary }]}>
+                    Secure authentication powered by Auth0
+                </Text>
+                <Text style={[styles.infoTextSmall, { color: colors.textSecondary }]}>
+                    You can create an account or log in on the next screen
+                </Text>
             </View>
         </View>
     );
@@ -62,51 +72,58 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        padding: 24,
         justifyContent: 'center',
+        padding: 24,
     },
     header: {
-        marginBottom: 60,
         alignItems: 'center',
+        marginBottom: 40,
     },
     title: {
-        fontSize: 42,
-        fontWeight: 'bold', // Should be Serif in real Hinge, but system bold is fine for now
-        marginBottom: 10,
-        fontFamily: 'SpaceMono', // Placeholder font
+        fontSize: 36,
+        fontWeight: 'bold',
+        fontFamily: 'SpaceMono',
+        marginBottom: 8,
     },
     subtitle: {
-        fontSize: 18,
-        textAlign: 'center',
-    },
-    buttons: {
-        gap: 16,
-    },
-    button: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 16,
-        borderRadius: 30, // Pill shape
-        borderWidth: 1,
-        borderColor: '#E5E5E5',
-        backgroundColor: '#FFFFFF',
-        elevation: 2,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-    },
-    googleButton: {},
-    facebookButton: {},
-    instaButton: {},
-    icon: {
-        marginRight: 16,
-        width: 30,
-        textAlign: 'center',
-    },
-    buttonText: {
         fontSize: 16,
-        fontWeight: '600',
-        color: '#000',
+        textAlign: 'center',
+    },
+    form: {
+        width: '100%',
+    },
+    errorText: {
+        fontSize: 14,
+        marginBottom: 12,
+        textAlign: 'center',
+    },
+    primaryButton: {
+        borderRadius: 16,
+        height: 56,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    primaryButtonText: {
+        color: '#fff',
+        fontSize: 18,
+        fontWeight: 'bold',
+        fontFamily: 'SpaceMono',
+    },
+    infoText: {
+        fontSize: 12,
+        textAlign: 'center',
+        marginBottom: 8,
+    },
+    infoTextSmall: {
+        fontSize: 11,
+        textAlign: 'center',
+        fontStyle: 'italic',
     },
 });

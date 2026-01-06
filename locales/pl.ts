@@ -38,4 +38,11 @@ export default {
     tab_stats: 'Wykresy',
     new_transaction: 'Nowa Transakcja',
     edit_transaction: 'Edytuj Transakcję',
+    email: 'Email',
+    password: 'Hasło',
+    sign_in: 'Zaloguj się',
+    sign_up: 'Zarejestruj się',
+    or: 'lub',
+    no_account: 'Nie masz konta?',
+    have_account: 'Masz już konto?',
 };

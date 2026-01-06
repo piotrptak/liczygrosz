@@ -38,4 +38,11 @@ export default {
     tab_stats: 'Stats',
     new_transaction: 'New Transaction',
     edit_transaction: 'Edit Transaction',
+    email: 'Email',
+    password: 'Password',
+    sign_in: 'Sign In',
+    sign_up: 'Sign Up',
+    or: 'or',
+    no_account: "Don't have an account?",
+    have_account: 'Already have an account?',
 };
