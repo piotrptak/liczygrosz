@@ -1,110 +1,83 @@
+import { getSetting, setSetting } from '@/db/database';
+import { CURRENCIES, formatMoney, getCurrencyFlag, getCurrencySymbol } from '@/utils/money';
+import { enUS, pl as plDate, type Locale } from 'date-fns/locale';
 import * as Localization from 'expo-localization';
+import { useSQLiteContext } from 'expo-sqlite';
 import { I18n } from 'i18n-js';
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useMemo, useState } from 'react';
 import en from '../locales/en';
 import pl from '../locales/pl';
 
-export const CURRENCIES = [
-    { code: 'USD', symbol: '$', flag: '🇺🇸' },
-    { code: 'EUR', symbol: '€', flag: '🇪🇺' },
-    { code: 'PLN', symbol: 'zł', flag: '🇵🇱' }
+export { CURRENCIES };
+
+export const LANGUAGES = [
+    { code: 'pl', name: 'Polski', flag: '🇵🇱' },
+    { code: 'en', name: 'English', flag: '🇬🇧' },
 ];
 
 const i18n = new I18n({ en, pl });
 i18n.enableFallback = true;
-i18n.locale = Localization.getLocales()[0].languageCode ?? 'en';
+i18n.defaultLocale = 'en';
 
-import { enUS, pl as plDate } from 'date-fns/locale';
-
-export const LANGUAGES = [
-    { code: 'en', name: 'English', flag: '🇺🇸' },
-    { code: 'pl', name: 'Polski', flag: '🇵🇱' }
-];
-
-// ... existing imports
+const deviceLocale = () => (Localization.getLocales()[0]?.languageCode === 'pl' ? 'pl' : 'en');
+const defaultCurrencyFor = (locale: string) => (locale === 'pl' ? 'PLN' : 'EUR');
 
 type LocalizationContextType = {
     t: (key: string, options?: any) => string;
     locale: string;
+    /** Symbol of the default currency. */
     currency: string;
     currencyCode: string;
     countryFlag: string;
-    dateLocale: any;
+    dateLocale: Locale;
     setLocale: (locale: string) => void;
     setCurrencyCode: (code: string) => void;
     languages: typeof LANGUAGES;
     currencies: typeof CURRENCIES;
     getCurrencySymbol: (code: string) => string;
     getCurrencyFlag: (code: string) => string;
+    formatMoney: (amount: number, code?: string | null) => string;
 };
 
-const LocalizationContext = createContext<LocalizationContextType>({
-    t: (key, options) => i18n.t(key, options),
-    locale: 'en',
-    currency: '$', // keeping as default code now, or symbol? Let's check usage. 
-    // Wait, original `currency` was symbol. The user wants "default currency depend on language".
-    // I should probably switch `currency` to be the "Active Currency Code" or just keep it as symbol for backward compatibility 
-    // but the request implies per-transaction currency. 
-    // The context `currency` seems to be the "Default App Currency". 
-    // I will treat `currency` in context as the "Preferred/Default Currency Code" moving forward, 
-    // BUT checking previous usage it was used as a symbol. 
-    // REQUIRED CHANGE: The previous usage `currency` was returning '$' or 'zł'.
-    // I will keep `currency` as the SYMBOL for simple display, but adds `defaultCurrencyCode`.
-    // Actually, let's look at `setCurrency` in provider.
-    currencyCode: 'USD',
-    countryFlag: '🇺🇸',
-    dateLocale: enUS,
-    setLocale: () => { },
-    setCurrencyCode: () => { },
-    languages: LANGUAGES,
-    currencies: CURRENCIES,
-    getCurrencySymbol: () => '$',
-    getCurrencyFlag: () => '🇺🇸',
-});
+const LocalizationContext = createContext<LocalizationContextType | null>(null);
 
-export const useLocalization = () => useContext(LocalizationContext);
+export const useLocalization = () => {
+    const ctx = useContext(LocalizationContext);
+    if (!ctx) throw new Error('useLocalization must be used inside LocalizationProvider');
+    return ctx;
+};
 
 export const LocalizationProvider = ({ children }: { children: React.ReactNode }) => {
-    const [locale, setLocale] = useState(i18n.locale);
-    const [currency, setCurrency] = useState('$');
-    const [currencyCode, setCurrencyCode] = useState('USD');
-    const [countryFlag, setCountryFlag] = useState('🇺🇸');
-    const [dateLocale, setDateLocale] = useState<any>(enUS);
+    const db = useSQLiteContext();
 
-    useEffect(() => {
-        i18n.locale = locale;
-        // Check if user has explicitly set a currency? For now, we update if natural switch, 
-        // but if we want strictly "default varies by language UNLESS overridden", we need more state.
-        // For simplicity: When language changes, we update the currency code to the language default,
-        // effectively resetting it. The user can then change it back if they want a mismatch.
-        // This satisfies "by default currency should be set according to the language".
+    const [locale, setLocaleState] = useState(() => getSetting(db, 'locale') ?? deviceLocale());
+    // null = follow the language default until the user picks a currency explicitly.
+    const [storedCurrency, setStoredCurrency] = useState(() => getSetting(db, 'currency'));
 
-        const newCode = locale === 'pl' ? 'PLN' : (locale === 'en' ? 'USD' : 'EUR');
-        setCurrencyCode(newCode);
-        setCurrency(CURRENCIES.find(c => c.code === newCode)?.symbol || '$');
+    const currencyCode = storedCurrency ?? defaultCurrencyFor(locale);
+    i18n.locale = locale;
 
-        setCountryFlag(locale === 'pl' ? '🇵🇱' : '🇺🇸');
-        setDateLocale(locale === 'pl' ? plDate : enUS);
-    }, [locale]);
+    const value = useMemo<LocalizationContextType>(() => ({
+        t: (key, options) => i18n.t(key, options),
+        locale,
+        currency: getCurrencySymbol(currencyCode),
+        currencyCode,
+        countryFlag: LANGUAGES.find(l => l.code === locale)?.flag ?? '🇬🇧',
+        dateLocale: locale === 'pl' ? plDate : enUS,
+        setLocale: (next: string) => {
+            setLocaleState(next);
+            setSetting(db, 'locale', next);
+        },
+        setCurrencyCode: (code: string) => {
+            setStoredCurrency(code);
+            setSetting(db, 'currency', code);
+        },
+        languages: LANGUAGES,
+        currencies: CURRENCIES,
+        getCurrencySymbol,
+        getCurrencyFlag,
+        formatMoney: (amount, code) => formatMoney(amount, code || currencyCode),
+    }), [db, locale, currencyCode]);
 
-    // Watch currencyCode changes to update symbol if changed manually
-    useEffect(() => {
-        setCurrency(CURRENCIES.find(c => c.code === currencyCode)?.symbol || '$');
-    }, [currencyCode]);
-
-    const t = (key: string, options?: any) => i18n.t(key, options);
-
-    const getCurrencySymbol = (code: string) => {
-        return CURRENCIES.find(c => c.code === code)?.symbol || code;
-    }
-
-    const getCurrencyFlag = (code: string) => {
-        return CURRENCIES.find(c => c.code === code)?.flag || '🇺🇸';
-    }
-
-    return (
-        <LocalizationContext.Provider value={{ t, locale, currency, currencyCode, countryFlag, dateLocale, setLocale, setCurrencyCode, languages: LANGUAGES, currencies: CURRENCIES, getCurrencySymbol, getCurrencyFlag }}>
-            {children}
-        </LocalizationContext.Provider>
-    );
+    return <LocalizationContext.Provider value={value}>{children}</LocalizationContext.Provider>;
 };

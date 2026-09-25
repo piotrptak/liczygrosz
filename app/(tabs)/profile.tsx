@@ -1,14 +1,18 @@
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
-import { useAuth } from '@/context/AuthContext';
 import { useLocalization } from '@/context/LocalizationContext';
+import { showMessage } from '@/utils/dialogs';
+import { exportTransactions } from '@/utils/exportCsv';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
+import { useSQLiteContext } from 'expo-sqlite';
 import React, { useState } from 'react';
-import { FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function ProfileScreen() {
-    const { signOut, user } = useAuth();
+    const db = useSQLiteContext();
     const { t, locale, setLocale, languages, countryFlag, currencyCode, setCurrencyCode, currencies } = useLocalization();
     const router = useRouter();
     const colorScheme = useColorScheme();
@@ -16,6 +20,16 @@ export default function ProfileScreen() {
 
     const [isLangModalVisible, setLangModalVisible] = useState(false);
     const [isCurrencyModalVisible, setCurrencyModalVisible] = useState(false);
+
+    const handleExport = async () => {
+        try {
+            const exported = await exportTransactions(db, currencyCode);
+            if (!exported) showMessage(t('export_csv'), t('export_empty'));
+        } catch (e) {
+            console.error(e);
+            showMessage(t('error'), String(e));
+        }
+    };
 
     const renderSettingItem = (
         icon: any,
@@ -39,47 +53,45 @@ export default function ProfileScreen() {
     );
 
     return (
-        <View style={[styles.container, { backgroundColor: colors.background }]}>
-            {/* Header / Profile Hero */}
-            <View style={styles.heroSection}>
-                <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-                    <Text style={styles.avatarText}>{user?.name?.charAt(0) || 'U'}</Text>
-                </View>
-                <View>
-                    <Text style={[styles.name, { color: colors.text }]}>{user?.name || 'User'}</Text>
-                    <Text style={[styles.email, { color: colors.textSecondary }]}>{user?.email || 'email@example.com'}</Text>
-                </View>
-            </View>
-
+        <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: colors.background }]}>
             <ScrollView contentContainerStyle={styles.scrollContent}>
+                <View style={styles.heroSection}>
+                    <Image source={require('../../assets/images/liczygrosz-icon.png')} style={styles.avatar} />
+                    <View style={{ flexShrink: 1 }}>
+                        <Text style={[styles.name, { color: colors.text }]}>LiczyGrosz</Text>
+                        <Text style={[styles.email, { color: colors.textSecondary }]}>{t('login_subtitle')}</Text>
+                    </View>
+                </View>
 
                 {/* Data Management Section */}
                 <View style={styles.section}>
-                    <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{t('settings') || 'Data'}</Text>
+                    <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{t('data')}</Text>
                     <View style={[styles.card, { backgroundColor: colors.surface }]}>
                         {renderSettingItem('list-circle', t('categories_title'), () => router.push('/categories/manage'))}
                         <View style={[styles.divider, { backgroundColor: colors.border }]} />
                         {renderSettingItem('repeat', t('recurring'), () => router.push('/recurring/manage'))}
+                        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+                        {renderSettingItem('download-outline', t('export_csv'), handleExport)}
                     </View>
                 </View>
 
                 {/* Preferences Section */}
                 <View style={styles.section}>
-                    <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>Preferences</Text>
+                    <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{t('preferences')}</Text>
                     <View style={[styles.card, { backgroundColor: colors.surface }]}>
                         {renderSettingItem(
                             'language',
-                            'Language',
+                            t('language'),
                             () => setLangModalVisible(true),
                             `${countryFlag} ${languages.find(l => l.code === locale)?.name}`,
-                            colors.secondary
+                            '#FF9500'
                         )}
 
                         <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
                         {renderSettingItem(
                             'wallet',
-                            'Default Currency',
+                            t('default_currency'),
                             () => setCurrencyModalVisible(true),
                             `${currencyCode}`,
                             colors.moneyIncome
@@ -87,17 +99,10 @@ export default function ProfileScreen() {
                     </View>
                 </View>
 
-                {/* Account Actions */}
-                <View style={styles.section}>
-                    <TouchableOpacity
-                        style={[styles.signOutBtn, { backgroundColor: colors.surface }]}
-                        onPress={signOut}
-                    >
-                        <Text style={[styles.signOutText, { color: colors.error }]}>Sign Out</Text>
-                    </TouchableOpacity>
-                </View>
-
-                <Text style={[styles.version, { color: colors.textSecondary }]}>Version 1.0.0 (Premium)</Text>
+                <Text style={[styles.info, { color: colors.textSecondary }]}>{t('local_data_info')}</Text>
+                <Text style={[styles.version, { color: colors.textSecondary }]}>
+                    {t('version', { version: Constants.expoConfig?.version ?? '1.0.0' })}
+                </Text>
             </ScrollView>
 
             {/* Language Modal */}
@@ -110,7 +115,7 @@ export default function ProfileScreen() {
                 <View style={styles.modalOverlay}>
                     <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
                         <View style={styles.modalHeader}>
-                            <Text style={[styles.modalTitle, { color: colors.text }]}>Select Language</Text>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>{t('select_language')}</Text>
                             <TouchableOpacity onPress={() => setLangModalVisible(false)}>
                                 <Ionicons name="close-circle" size={28} color={colors.textSecondary} />
                             </TouchableOpacity>
@@ -155,7 +160,7 @@ export default function ProfileScreen() {
                 <View style={styles.modalOverlay}>
                     <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
                         <View style={styles.modalHeader}>
-                            <Text style={[styles.modalTitle, { color: colors.text }]}>Select Currency</Text>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>{t('select_currency')}</Text>
                             <TouchableOpacity onPress={() => setCurrencyModalVisible(false)}>
                                 <Ionicons name="close-circle" size={28} color={colors.textSecondary} />
                             </TouchableOpacity>
@@ -180,7 +185,7 @@ export default function ProfileScreen() {
                                         <Text style={{ fontSize: 24, fontWeight: 'bold', color: colors.text }}>{item.symbol}</Text>
                                     </View>
                                     <Text style={[styles.langText, { color: colors.text, fontWeight: currencyCode === item.code ? 'bold' : '400' }]}>
-                                        {item.code}
+                                        {item.flag} {item.code}
                                     </Text>
                                     {currencyCode === item.code && (
                                         <Ionicons name="checkmark-circle" size={24} color={colors.primary} style={{ marginLeft: 'auto' }} />
@@ -191,7 +196,7 @@ export default function ProfileScreen() {
                     </View>
                 </View>
             </Modal>
-        </View>
+        </SafeAreaView>
     );
 }
 
@@ -207,27 +212,15 @@ const styles = StyleSheet.create({
     heroSection: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 24,
-        paddingTop: 80,
-        paddingBottom: 40,
+        paddingHorizontal: 4,
+        paddingTop: 24,
+        paddingBottom: 32,
     },
     avatar: {
         width: 72,
         height: 72,
-        borderRadius: 36,
-        justifyContent: 'center',
-        alignItems: 'center',
+        borderRadius: 18,
         marginRight: 20,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.2,
-        shadowRadius: 12,
-        elevation: 6,
-    },
-    avatarText: {
-        fontSize: 28,
-        fontWeight: 'bold',
-        color: '#FFF',
     },
     name: {
         fontSize: 24,
@@ -239,6 +232,9 @@ const styles = StyleSheet.create({
     },
     scrollContent: {
         paddingHorizontal: 20,
+        width: '100%',
+        maxWidth: 640,
+        alignSelf: 'center',
     },
     section: {
         marginBottom: 32,
@@ -289,14 +285,12 @@ const styles = StyleSheet.create({
         height: StyleSheet.hairlineWidth,
         marginLeft: 76,
     },
-    signOutBtn: {
-        padding: 20,
-        borderRadius: 24,
-        alignItems: 'center',
-    },
-    signOutText: {
-        fontSize: 17,
-        fontWeight: '600',
+    info: {
+        textAlign: 'center',
+        fontSize: 13,
+        lineHeight: 18,
+        marginBottom: 12,
+        paddingHorizontal: 12,
     },
     version: {
         textAlign: 'center',
@@ -315,7 +309,10 @@ const styles = StyleSheet.create({
         borderTopRightRadius: 32,
         padding: 24,
         paddingBottom: 48,
-        minHeight: 400,
+        minHeight: 320,
+        width: '100%',
+        maxWidth: 640,
+        alignSelf: 'center',
     },
     modalHeader: {
         flexDirection: 'row',

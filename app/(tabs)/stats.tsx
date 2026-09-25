@@ -3,168 +3,117 @@ import Colors from '@/constants/Colors';
 import { useLocalization } from '@/context/LocalizationContext';
 import { useIsFocused } from '@react-navigation/native';
 import { useSQLiteContext } from 'expo-sqlite';
+import { addMonths, differenceInCalendarMonths, endOfMonth, format, startOfMonth, subMonths } from 'date-fns';
 import React, { useEffect, useState } from 'react';
-import { Dimensions, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function StatsScreen() {
     const db = useSQLiteContext();
     const isFocused = useIsFocused();
-    const { t, currency } = useLocalization();
+    const { t, currency, currencyCode, dateLocale, formatMoney } = useLocalization();
     const colorScheme = useColorScheme();
     const colors = Colors[colorScheme ?? 'light'];
+    const { width } = useWindowDimensions();
+    const chartWidth = Math.min(width, 640) - 80; // screen padding 48 + card padding 32
 
     const [chartData, setChartData] = useState<{ labels: string[], datasets: { data: number[] }[] } | null>(null);
-    const [savingsSuggestion, setSavingsSuggestion] = useState<string>('');
-    const [loading, setLoading] = useState(true);
+    const [monthNet, setMonthNet] = useState(0);
 
     useEffect(() => {
         if (isFocused) {
             loadStats();
         }
-    }, [isFocused]);
+    }, [isFocused, currencyCode, dateLocale]);
 
+    // Only the default currency is considered; amounts in other currencies are not convertible here.
     const loadStats = async () => {
         try {
-            setLoading(true);
             const now = new Date();
 
-            // 1. Savings Suggestion (Income vs Expense this month)
-            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+            const monthTotals = await db.getAllAsync<{ type: string; total: number }>(`
+                SELECT type, SUM(amount) as total FROM transactions
+                WHERE date >= ? AND date <= ? AND COALESCE(currency, ?) = ?
+                GROUP BY type
+            `, [startOfMonth(now).getTime(), endOfMonth(now).getTime(), currencyCode, currencyCode]);
 
-            const transactionsThisMonth = await db.getAllAsync(`
-                SELECT type, amount FROM transactions 
-                WHERE date >= ? 
-            `, [startOfMonth.getTime()]);
+            const income = monthTotals.find(r => r.type === 'income')?.total ?? 0;
+            const expense = monthTotals.find(r => r.type === 'expense')?.total ?? 0;
+            setMonthNet(income - expense);
 
-            let income = 0;
-            let expense = 0;
-            // @ts-ignore
-            transactionsThisMonth.forEach((t: any) => {
-                if (t.type === 'income') income += t.amount;
-                else expense += t.amount;
+            // Last 6 months of expenses
+            const firstMonth = startOfMonth(subMonths(now, 5));
+            const expenses = await db.getAllAsync<{ amount: number; date: number }>(`
+                SELECT amount, date FROM transactions
+                WHERE type = 'expense' AND date >= ? AND date <= ? AND COALESCE(currency, ?) = ?
+            `, [firstMonth.getTime(), endOfMonth(now).getTime(), currencyCode, currencyCode]);
+
+            const months = Array.from({ length: 6 }, (_, i) => addMonths(firstMonth, i));
+            const dataPoints = months.map(() => 0);
+            expenses.forEach(tx => {
+                const index = differenceInCalendarMonths(new Date(tx.date), firstMonth);
+                if (index >= 0 && index < 6) dataPoints[index] += tx.amount;
             });
 
-            const potentialSavings = income - expense;
-            if (potentialSavings > 0) {
-                setSavingsSuggestion(t('savings_message', { amount: `${currency}${potentialSavings.toFixed(2)}` }));
-            } else {
-                // Alternate message if no savings
-                setSavingsSuggestion(t('savings_message', { amount: `${currency}0.00` }));
-            }
-
-            // 2. Chart Data (Last 6 Months Expenses)
-            // We need to calculate this manually because SQLite in Expo can be tricky with dates
-            const sixMonthsAgo = new Date();
-            sixMonthsAgo.setMonth(now.getMonth() - 5);
-            sixMonthsAgo.setDate(1);
-            sixMonthsAgo.setHours(0, 0, 0, 0);
-
-            const allExpenses = await db.getAllAsync(`
-                SELECT amount, date FROM transactions 
-                WHERE type = 'expense' AND date >= ?
-                ORDER BY date ASC
-            `, [sixMonthsAgo.getTime()]);
-
-            // Aggregate by month
-            const monthlyData: { [key: string]: number } = {};
-            const monthLabels: string[] = [];
-
-            // Initialize last 6 months with 0
-            for (let i = 0; i < 6; i++) {
-                const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1);
-                const key = `${d.getFullYear()}-${d.getMonth()}`;
-                // Short month name
-                const monthName = d.toLocaleString('default', { month: 'short' });
-                // We use 'en-US' default for labels to keep it short or could use locale
-                // actually toLocaleString might depend on device. Let's use simple array or explicit locale if needed.
-                // For safety in JS engine:
-                const mNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                monthLabels.push(mNames[d.getMonth()]);
-                monthlyData[key] = 0;
-            }
-
-            // @ts-ignore
-            allExpenses.forEach((t: any) => {
-                const d = new Date(t.date);
-                const key = `${d.getFullYear()}-${d.getMonth()}`;
-                // Only add if it falls in our window (query mostly handles this)
-                if (monthlyData[key] !== undefined) {
-                    monthlyData[key] += t.amount;
-                }
-            });
-
-            const dataPoints = Object.values(monthlyData);
-
-            // Check if we have any data at all to show
-            if (dataPoints.some(v => v > 0)) {
-                setChartData({
-                    labels: monthLabels,
-                    datasets: [{ data: dataPoints }]
-                });
-            } else {
-                setChartData(null);
-            }
-
+            setChartData(dataPoints.some(v => v > 0) ? {
+                labels: months.map(m => format(m, 'LLL', { locale: dateLocale })),
+                datasets: [{ data: dataPoints }],
+            } : null);
         } catch (e) {
             console.error(e);
-        } finally {
-            setLoading(false);
         }
     };
 
     return (
-        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: colors.background }]}>
             <ScrollView contentContainerStyle={styles.content}>
                 <View style={styles.header}>
-                    <Text style={[styles.title, { color: colors.text }]}>{t('transactions')}</Text>
+                    <Text style={[styles.title, { color: colors.text }]}>{t('stats_title')}</Text>
+                    <Text style={{ color: colors.textSecondary, marginTop: 4 }}>{t('amounts_in', { currency: currencyCode })}</Text>
                 </View>
 
-                {/* Savings Card - Modern Style */}
-                <View style={[styles.card, { backgroundColor: colors.surface, borderLeftColor: colors.primary }]}>
-                    <Text style={[styles.cardTitle, { color: colors.primary }]}>{t('savings_suggestion')}</Text>
-                    <Text style={[styles.cardBody, { color: colors.text }]}>{savingsSuggestion}</Text>
+                <View style={[styles.card, { backgroundColor: colors.surface, borderLeftColor: monthNet >= 0 ? colors.primary : colors.error }]}>
+                    <Text style={[styles.cardTitle, { color: monthNet >= 0 ? colors.primary : colors.error }]}>{t('savings_suggestion')}</Text>
+                    <Text style={[styles.cardBody, { color: colors.text }]}>
+                        {monthNet >= 0
+                            ? t('savings_message', { amount: formatMoney(monthNet) })
+                            : t('savings_negative', { amount: formatMoney(-monthNet) })}
+                    </Text>
                 </View>
 
-                {/* Chart */}
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Expense Trend</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('expense_trend')}</Text>
                 {chartData ? (
                     <View style={[styles.chartContainer, { backgroundColor: colors.surface }]}>
                         <LineChart
                             data={chartData}
-                            width={Dimensions.get('window').width - 72} // -40 padding -32 card padding
+                            width={chartWidth}
                             height={220}
-                            yAxisLabel={currency}
-                            yAxisSuffix=""
+                            yAxisLabel={currencyCode === 'PLN' ? '' : currency}
+                            yAxisSuffix={currencyCode === 'PLN' ? ' zł' : ''}
                             yAxisInterval={1}
+                            fromZero
                             chartConfig={{
                                 backgroundColor: colors.surface,
                                 backgroundGradientFrom: colors.surface,
                                 backgroundGradientTo: colors.surface,
                                 decimalPlaces: 0,
-                                color: (opacity = 1) => colors.primary,
-                                labelColor: (opacity = 1) => colors.textSecondary,
-                                style: {
-                                    borderRadius: 16
-                                },
+                                color: () => colors.primary,
+                                labelColor: () => colors.textSecondary,
                                 propsForDots: {
-                                    r: "5",
-                                    strokeWidth: "2",
-                                    stroke: colors.background
-                                }
+                                    r: '5',
+                                    strokeWidth: '2',
+                                    stroke: colors.background,
+                                },
                             }}
                             bezier
                             withInnerLines={false}
                             withOuterLines={false}
-                            style={{
-                                marginVertical: 8,
-                                borderRadius: 16
-                            }}
+                            style={{ marginVertical: 8, borderRadius: 16 }}
                         />
                     </View>
                 ) : (
-                    <View style={[styles.chartContainer, { backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' }]}>
+                    <View style={[styles.chartContainer, styles.emptyChart, { backgroundColor: colors.surface }]}>
                         <Text style={{ color: colors.textSecondary }}>{t('no_transactions')}</Text>
                     </View>
                 )}
@@ -179,9 +128,12 @@ const styles = StyleSheet.create({
     },
     content: {
         padding: 24,
+        width: '100%',
+        maxWidth: 640,
+        alignSelf: 'center',
     },
     header: {
-        marginBottom: 32,
+        marginBottom: 24,
     },
     title: {
         fontSize: 34,
@@ -228,5 +180,9 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.03,
         shadowRadius: 10,
         elevation: 2,
-    }
+    },
+    emptyChart: {
+        height: 120,
+        justifyContent: 'center',
+    },
 });
