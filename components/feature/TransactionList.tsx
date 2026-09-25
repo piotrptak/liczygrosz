@@ -1,56 +1,57 @@
-import { useColorScheme } from '@/components/useColorScheme';
-import Colors from '@/constants/Colors';
+import CategoryIcon from '@/components/ui/CategoryIcon';
+import EmptyState from '@/components/ui/EmptyState';
+import Skeleton from '@/components/ui/Skeleton';
+import Text from '@/components/ui/Text';
+import { radius, space, useTheme } from '@/constants/theme';
 import { useLocalization } from '@/context/LocalizationContext';
 import { deleteTransaction, fetchCategories, type Transaction } from '@/lib/api';
 import { invalidateTransactions, keys } from '@/lib/queryClient';
-import { useMonthTransactions } from '@/lib/useMonthTransactions';
-import { confirmAction, showMessage } from '@/utils/dialogs';
+import { confirmAction, showMessage, showSuccess } from '@/utils/dialogs';
 import { errorKey } from '@/utils/errors';
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQuery } from '@tanstack/react-query';
 import { format, isThisYear, isToday, isYesterday } from 'date-fns';
 import { useRouter } from 'expo-router';
+import { CirclePlus, Receipt, Trash2, WifiOff } from '@/components/ui/icons';
 import React, { useMemo } from 'react';
-import { ActivityIndicator, SectionList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Platform, Pressable, SectionList, StyleSheet, View, type ViewStyle } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 
 type Row = Transaction & { category_icon?: string | null; category_color?: string | null };
+type Section = { title: string; net: Record<string, number>; data: Row[] };
 
-interface SectionData {
-    title: string;
-    data: Row[];
-}
-
-interface TransactionListProps {
-    selectedDate: Date;
+type Props = {
+    transactions: Transaction[];
+    loading: boolean;
+    error: boolean;
+    onRetry: () => void;
     filterType: 'all' | 'income' | 'expense';
-}
+    header?: React.ReactElement;
+};
 
-export default function TransactionList({ selectedDate, filterType }: TransactionListProps) {
+export default function TransactionList({ transactions, loading, error, onRetry, filterType, header }: Props) {
     const router = useRouter();
+    const { colors } = useTheme();
     const { t, dateLocale, formatMoney } = useLocalization();
-    const colorScheme = useColorScheme();
-    const colors = Colors[colorScheme ?? 'light'];
-
-    const { data: transactions = [], isPending, isError, refetch } = useMonthTransactions(selectedDate);
     const { data: categories = [] } = useQuery({ queryKey: keys.categories, queryFn: fetchCategories });
 
-    const sections = useMemo<SectionData[]>(() => {
+    const sections = useMemo<Section[]>(() => {
         const byName = new Map(categories.map(c => [c.name, c]));
-        const grouped = new Map<string, Row[]>();
+        const grouped = new Map<string, Section>();
         for (const tx of transactions) {
             if (filterType !== 'all' && tx.type !== filterType) continue;
             const date = new Date(tx.date);
-            let key = format(date, 'd MMM yyyy', { locale: dateLocale });
-            if (isToday(date)) key = t('today');
-            else if (isYesterday(date)) key = t('yesterday');
-            else if (isThisYear(date)) key = format(date, 'd MMM', { locale: dateLocale });
+            let title = format(date, 'EEEE, d MMMM yyyy', { locale: dateLocale });
+            if (isToday(date)) title = t('today');
+            else if (isYesterday(date)) title = t('yesterday');
+            else if (isThisYear(date)) title = format(date, 'EEEE, d MMMM', { locale: dateLocale });
 
+            if (!grouped.has(title)) grouped.set(title, { title, net: {}, data: [] });
+            const section = grouped.get(title)!;
             const category = byName.get(tx.category);
-            if (!grouped.has(key)) grouped.set(key, []);
-            grouped.get(key)!.push({ ...tx, category_icon: category?.icon, category_color: category?.color });
+            section.data.push({ ...tx, category_icon: category?.icon, category_color: category?.color });
+            section.net[tx.currency] = (section.net[tx.currency] ?? 0) + (tx.type === 'income' ? tx.amount : -tx.amount);
         }
-        return [...grouped].map(([title, data]) => ({ title, data }));
+        return [...grouped.values()];
     }, [transactions, categories, filterType, dateLocale, t]);
 
     const handleDelete = (id: string) => {
@@ -58,88 +59,87 @@ export default function TransactionList({ selectedDate, filterType }: Transactio
             try {
                 await deleteTransaction(id);
                 await invalidateTransactions();
-            } catch (error) {
-                showMessage(t('error'), t(errorKey(error)));
+                showSuccess(t('transaction_deleted'));
+            } catch (e) {
+                showMessage(t('error'), t(errorKey(e)));
             }
         });
     };
 
-    const handleEdit = (item: Row) => {
-        router.push({ pathname: '/transaction/[id]', params: { id: item.id } });
-    };
-
-    const renderRightActions = (id: string) => {
-        return (
-            <TouchableOpacity
-                style={styles.deleteAction}
-                onPress={() => handleDelete(id)}
-            >
-                <Ionicons name="trash" size={24} color="#FFF" />
-            </TouchableOpacity>
-        );
-    };
-
-    // Helper to render icon safely
-    const renderCategoryIcon = (iconName: string | null | undefined, color: string | undefined) => {
-        // Use generic icon if missing
-        const name = (iconName as any) || 'pricetag-outline';
-        return <Ionicons name={name} size={20} color={color || '#FFF'} />;
-    };
-
-    const renderItem = ({ item }: { item: Row }) => {
+    const renderItem = ({ item, index, section }: { item: Row; index: number; section: Section }) => {
         const isIncome = item.type === 'income';
-        // Use category color or fallback to income/expense colors
-        const iconColor = item.category_color ? '#FFF' : (isIncome ? colors.success : colors.textSecondary);
-        const iconBg = item.category_color ? item.category_color : (isIncome ? colors.success + '20' : colors.secondary);
-
+        const first = index === 0;
+        const last = index === section.data.length - 1;
         return (
-            <Swipeable renderRightActions={() => renderRightActions(item.id)}>
-                <TouchableOpacity
-                    activeOpacity={0.7}
-                    onPress={() => handleEdit(item)}
-                    style={[styles.card, { backgroundColor: colors.surface }]}
+            <Swipeable
+                renderRightActions={() => (
+                    <Pressable
+                        onPress={() => handleDelete(item.id)}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('delete')}
+                        style={[styles.deleteAction, { backgroundColor: colors.expense }]}
+                    >
+                        <Trash2 size={20} color="#FFFFFF" />
+                    </Pressable>
+                )}
+            >
+                <Pressable
+                    onPress={() => router.push({ pathname: '/transaction/[id]', params: { id: item.id } })}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${item.note || item.category}, ${item.category}, ${isIncome ? '+' : '-'}${formatMoney(item.amount, item.currency)}`}
+                    style={(state) => {
+                        const { pressed, hovered, focused } = state as typeof state & { hovered?: boolean; focused?: boolean };
+                        return [
+                            styles.row,
+                            { backgroundColor: pressed || hovered ? colors.surfaceHover : colors.surface, borderColor: colors.border },
+                            first && styles.rowFirst,
+                            last && styles.rowLast,
+                            !first && { borderTopWidth: 0 },
+                            focused && Platform.OS === 'web' && { outlineColor: colors.focus, outlineStyle: 'solid', outlineWidth: 2, outlineOffset: -2 } as ViewStyle,
+                        ];
+                    }}
                 >
-                    <View style={[styles.iconContainer, { backgroundColor: iconBg }]}>
-                        {renderCategoryIcon(item.category_icon, iconColor)}
-                    </View>
+                    <CategoryIcon icon={item.category_icon} color={item.category_color} />
                     <View style={styles.details}>
-                        <Text style={[styles.category, { color: colors.text }]}>{item.category}</Text>
-                        {item.note ? <Text numberOfLines={1} style={[styles.note, { color: colors.textSecondary }]}>{item.note}</Text> : null}
+                        <Text variant="bodyStrong" numberOfLines={1}>{item.note || item.category}</Text>
+                        <Text variant="caption" tone="muted" numberOfLines={1}>{item.category}</Text>
                     </View>
-                    <View style={styles.amountContainer}>
-                        <Text style={[
-                            styles.amount,
-                            { color: isIncome ? colors.moneyIncome : colors.text }
-                        ]}>
-                            {isIncome ? '+' : '-'}{formatMoney(item.amount, item.currency)}
-                        </Text>
-                    </View>
-                </TouchableOpacity>
+                    <Text variant="bodyStrong" tabular tone={isIncome ? 'income' : 'default'}>
+                        {isIncome ? '+' : '−'}{formatMoney(item.amount, item.currency)}
+                    </Text>
+                </Pressable>
             </Swipeable>
         );
     };
 
-    const renderSectionHeader = ({ section: { title } }: { section: { title: string } }) => (
-        <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{title}</Text>
+    const renderSectionHeader = ({ section }: { section: Section }) => (
+        <View style={styles.sectionHeader}>
+            <Text variant="overline" tone="muted" style={{ flex: 1 }}>{section.title}</Text>
+            <Text variant="caption" tone="muted" tabular>
+                {Object.entries(section.net).map(([code, v]) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${formatMoney(Math.abs(v), code)}`).join(' · ')}
+            </Text>
+        </View>
     );
 
-    if (isPending) {
-        return <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 20 }} />;
-    }
-
-    if (isError && transactions.length === 0) {
-        return (
-            <TouchableOpacity style={styles.emptyContainer} onPress={() => refetch()}>
-                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{t('error_offline')}</Text>
-            </TouchableOpacity>
-        );
-    }
-
-    if (sections.length === 0) {
-        return (
-            <View style={styles.emptyContainer}>
-                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{t('no_transactions')}</Text>
+    let empty: React.ReactElement;
+    if (loading) {
+        empty = (
+            <View style={{ gap: space.sm, marginTop: space.lg }}>
+                {[0, 1, 2, 3].map(i => <Skeleton key={i} height={68} rounded={radius.lg} />)}
             </View>
+        );
+    } else if (error) {
+        empty = <EmptyState icon={WifiOff} tone="error" title={t('load_failed_title')} description={t('error_offline')} actionLabel={t('retry')} onAction={onRetry} />;
+    } else {
+        empty = (
+            <EmptyState
+                icon={Receipt}
+                title={t('empty_month_title')}
+                description={t('empty_month_description')}
+                actionLabel={t('add_transaction')}
+                actionIcon={CirclePlus}
+                onAction={() => router.navigate('/(tabs)/add')}
+            />
         );
     }
 
@@ -149,6 +149,8 @@ export default function TransactionList({ selectedDate, filterType }: Transactio
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             renderSectionHeader={renderSectionHeader}
+            ListHeaderComponent={header}
+            ListEmptyComponent={empty}
             contentContainerStyle={styles.list}
             showsVerticalScrollIndicator={false}
             stickySectionHeadersEnabled={false}
@@ -157,73 +159,19 @@ export default function TransactionList({ selectedDate, filterType }: Transactio
 }
 
 const styles = StyleSheet.create({
-    list: {
-        paddingBottom: 40,
-    },
-    sectionHeader: {
-        fontSize: 13,
-        fontWeight: '600',
-        marginBottom: 8,
-        marginTop: 24,
-        textTransform: 'uppercase',
-        letterSpacing: 1,
-        opacity: 0.7,
-    },
-    card: {
+    list: { paddingBottom: space.xxxl, paddingHorizontal: space.xl },
+    sectionHeader: { flexDirection: 'row', alignItems: 'center', marginTop: space.xl, marginBottom: space.sm, paddingHorizontal: space.xs },
+    row: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
-        marginBottom: 12,
-        borderRadius: 20,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.03, // Extra subtle
-        shadowRadius: 10,
-        elevation: 2,
+        gap: space.md,
+        paddingHorizontal: space.lg,
+        paddingVertical: space.md,
+        minHeight: 68,
+        borderWidth: 1,
     },
-    deleteAction: {
-        backgroundColor: '#FF3B30',
-        justifyContent: 'center',
-        alignItems: 'center',
-        width: 80,
-        marginBottom: 12,
-        borderRadius: 20,
-        height: '84%',
-        marginTop: 0,
-        marginLeft: 10,
-    },
-    iconContainer: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 16,
-    },
-    details: {
-        flex: 1,
-    },
-    category: {
-        fontSize: 16,
-        fontWeight: '600',
-        marginBottom: 2,
-    },
-    note: {
-        fontSize: 12,
-    },
-    amountContainer: {
-        alignItems: 'flex-end',
-    },
-    amount: {
-        fontSize: 16,
-        fontWeight: '700',
-        fontFamily: 'SpaceMono',
-    },
-    emptyContainer: {
-        padding: 40,
-        alignItems: 'center',
-    },
-    emptyText: {
-        fontSize: 16,
-    },
+    rowFirst: { borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg },
+    rowLast: { borderBottomLeftRadius: radius.lg, borderBottomRightRadius: radius.lg },
+    details: { flex: 1, gap: 2 },
+    deleteAction: { justifyContent: 'center', alignItems: 'center', width: 72, borderRadius: radius.lg, marginLeft: space.sm },
 });

@@ -1,5 +1,8 @@
-import FontAwesome from '@expo/vector-icons/FontAwesome';
-import Ionicons from '@expo/vector-icons/Ionicons';
+// Per-weight imports: the package index would bundle all 18 font files.
+import { Inter_400Regular } from '@expo-google-fonts/inter/400Regular';
+import { Inter_500Medium } from '@expo-google-fonts/inter/500Medium';
+import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
+import { Inter_700Bold } from '@expo-google-fonts/inter/700Bold';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
@@ -7,12 +10,13 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
-import { useColorScheme } from '@/components/useColorScheme';
-import Colors from '@/constants/Colors';
+import { FeedbackProvider } from '@/components/ui/Feedback';
+import Text from '@/components/ui/Text';
+import { palette, useTheme } from '@/constants/theme';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { LocalizationProvider, useLocalization } from '@/context/LocalizationContext';
 import { persister } from '@/lib/persister';
@@ -30,9 +34,10 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [loaded, error] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-    ...FontAwesome.font,
-    ...Ionicons.font,
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
   });
 
   // Expo Router uses Error Boundaries to catch errors in the navigation tree.
@@ -63,15 +68,22 @@ function QueryProvider({ children }: { children: React.ReactNode }) {
 }
 
 function RootLayoutNav() {
-  const colorScheme = useColorScheme();
+  const { scheme } = useTheme();
+  const base = scheme === 'dark' ? DarkTheme : DefaultTheme;
+  const navTheme = {
+    ...base,
+    colors: { ...base.colors, background: palette[scheme].background, card: palette[scheme].surface, border: palette[scheme].border, primary: palette[scheme].primary, text: palette[scheme].text },
+  };
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <QueryProvider>
         <AuthProvider>
           <LocalizationProvider>
-            <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-              <AppStack />
+            <ThemeProvider value={navTheme}>
+              <FeedbackProvider>
+                <AppStack />
+              </FeedbackProvider>
             </ThemeProvider>
           </LocalizationProvider>
         </AuthProvider>
@@ -83,13 +95,13 @@ function RootLayoutNav() {
 function AppStack() {
   const { user, initializing, recovery } = useAuth();
   const { locale } = useLocalization();
-  const colors = Colors[useColorScheme() ?? 'light'];
+  const { colors } = useTheme();
   useSync(locale);
 
   if (!isSupabaseConfigured) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: colors.background }}>
-        <Text style={{ color: colors.text, textAlign: 'center' }}>
+        <Text align="center">
           Missing EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY. See README.
         </Text>
       </View>

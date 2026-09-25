@@ -1,55 +1,69 @@
-import { useColorScheme } from '@/components/useColorScheme';
-import Colors from '@/constants/Colors';
+import Button from '@/components/ui/Button';
+import Card from '@/components/ui/Card';
+import CategoryIcon, { CATEGORY_COLORS, CATEGORY_ICONS } from '@/components/ui/CategoryIcon';
+import EmptyState from '@/components/ui/EmptyState';
+import IconButton from '@/components/ui/IconButton';
+import ListRow from '@/components/ui/ListRow';
+import Screen from '@/components/ui/Screen';
+import SegmentedControl from '@/components/ui/SegmentedControl';
+import Sheet from '@/components/ui/Sheet';
+import Skeleton from '@/components/ui/Skeleton';
+import Text from '@/components/ui/Text';
+import TextField from '@/components/ui/TextField';
+import { layout, radius, space, useTheme } from '@/constants/theme';
 import { useLocalization } from '@/context/LocalizationContext';
-import ScreenHeader from '@/components/ui/ScreenHeader';
-import { confirmAction, showMessage } from '@/utils/dialogs';
 import { createCategory, deleteCategory, fetchCategories, type TxType } from '@/lib/api';
 import { keys, queryClient } from '@/lib/queryClient';
+import { confirmAction, showMessage, showSuccess } from '@/utils/dialogs';
 import { errorKey } from '@/utils/errors';
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQuery } from '@tanstack/react-query';
+import { ArrowDownLeft, ArrowUpRight, Check, Plus, Tag, Tags, Trash2 } from '@/components/ui/icons';
 import React, { useState } from 'react';
-import { FlatList, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 export default function ManageCategories() {
     const { t } = useLocalization();
-    const colorScheme = useColorScheme();
-    const colors = Colors[colorScheme ?? 'light'];
+    const { colors } = useTheme();
+    const { data: categories = [], isPending } = useQuery({ queryKey: keys.categories, queryFn: fetchCategories });
 
-    const { data: categories = [] } = useQuery({ queryKey: keys.categories, queryFn: fetchCategories });
-    const [isModalVisible, setModalVisible] = useState(false);
-    const [newCategoryName, setNewCategoryName] = useState('');
-    const [selectedIcon, setSelectedIcon] = useState('cart');
-    const [selectedColor, setSelectedColor] = useState(colors.tint);
+    const [filter, setFilter] = useState<TxType>('expense');
+    const [open, setOpen] = useState(false);
+    const [name, setName] = useState('');
+    const [nameError, setNameError] = useState<string | null>(null);
     const [type, setType] = useState<TxType>('expense');
+    const [icon, setIcon] = useState('shopping-cart');
+    const [color, setColor] = useState(CATEGORY_COLORS[0]);
+    const [saving, setSaving] = useState(false);
 
-    // Valid Ionicons names
-    const icons = ['cart', 'home', 'car', 'restaurant', 'airplane', 'heart', 'game-controller', 'briefcase', 'school', 'gift', 'medical', 'paw', 'construct', 'barbell'];
-    const palette = ['#FF3B30', '#FF9500', '#FFCC00', '#4CD964', '#5AC8FA', '#007AFF', '#5856D6', '#FF2D55', '#8E8E93', '#2C2C2E'];
-
+    const visible = categories.filter(c => c.type === filter);
     const refresh = () => queryClient.invalidateQueries({ queryKey: keys.categories });
 
-    const handleAddCategory = async () => {
-        const name = newCategoryName.trim();
-        if (!name) {
-            showMessage(t('error'), t('category_name_required'));
-            return;
-        }
-        // Transactions reference categories by name, so names must be unique.
-        if (categories.some(c => c.name.toLowerCase() === name.toLowerCase())) {
-            showMessage(t('error'), t('category_exists'));
-            return;
-        }
+    const openSheet = () => {
+        setName('');
+        setNameError(null);
+        setType(filter);
+        setIcon(filter === 'income' ? 'banknote' : 'shopping-cart');
+        setColor(CATEGORY_COLORS[0]);
+        setOpen(true);
+    };
 
+    const handleAdd = async () => {
+        const trimmed = name.trim();
+        if (!trimmed) return setNameError(t('category_name_required'));
+        // Transactions reference categories by name, so names must be unique.
+        if (categories.some(c => c.name.toLowerCase() === trimmed.toLowerCase())) return setNameError(t('category_exists'));
+
+        setSaving(true);
         try {
-            await createCategory({ name, type, icon: selectedIcon, color: selectedColor });
-            setModalVisible(false);
-            setNewCategoryName('');
-            refresh();
-        } catch (error) {
-            console.error(error);
-            showMessage(t('error'), t(errorKey(error)));
+            await createCategory({ name: trimmed, type, icon, color });
+            await refresh();
+            setOpen(false);
+            setFilter(type);
+            showSuccess(t('category_added'));
+        } catch (e) {
+            showMessage(t('error'), t(errorKey(e)));
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -57,120 +71,133 @@ export default function ManageCategories() {
         confirmAction(t('delete_category_title'), t('delete_category_message'), t('delete'), t('cancel'), async () => {
             try {
                 await deleteCategory(id);
-                refresh();
-            } catch (error) {
-                showMessage(t('error'), t(errorKey(error)));
+                await refresh();
+            } catch (e) {
+                showMessage(t('error'), t(errorKey(e)));
             }
         });
     };
 
     return (
-        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-            <ScreenHeader title={t('categories_title')} />
-            <View style={styles.body}>
-
-            <TouchableOpacity
-                style={[styles.addButton, { backgroundColor: colors.primary }]}
-                onPress={() => setModalVisible(true)}
-            >
-                <Text style={styles.addButtonText}>+ {t('new_category')}</Text>
-            </TouchableOpacity>
-
-            <FlatList
-                data={categories}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                    <View style={[styles.card, { backgroundColor: colors.surface }]}>
-                        <View style={[styles.iconContainer, { backgroundColor: item.color || colors.secondary }]}>
-                            {/* Render Ionicons safely */}
-                            <Ionicons name={item.icon as any || 'ellipse'} size={18} color="#FFF" />
-                        </View>
-                        <Text style={[styles.categoryName, { color: colors.text }]}>{item.name}</Text>
-                        <Text style={[styles.categoryType, { color: item.type === 'income' ? colors.success : colors.textSecondary }]}>{t(item.type)}</Text>
-                        <TouchableOpacity onPress={() => handleDelete(item.id)} style={styles.deleteButton}>
-                            <Ionicons name="trash-outline" size={20} color={colors.error} />
-                        </TouchableOpacity>
-                    </View>
-                )}
-                contentContainerStyle={styles.list}
+        <Screen
+            title={t('categories_title')}
+            backTo="/(tabs)/profile"
+            width={layout.formWidth + 80}
+            actions={<Button label={t('new')} icon={Plus} size="sm" onPress={openSheet} />}
+        >
+            <SegmentedControl<TxType>
+                value={filter}
+                onChange={setFilter}
+                options={[
+                    { value: 'expense', label: t('expense'), icon: ArrowUpRight, tone: 'expense' },
+                    { value: 'income', label: t('income'), icon: ArrowDownLeft, tone: 'income' },
+                ]}
             />
-            </View>
 
-            <Modal visible={isModalVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModalVisible(false)}>
-                <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
-                    <Text style={[styles.modalTitle, { color: colors.text }]}>{t('new_category')}</Text>
+            {isPending ? (
+                <Skeleton height={240} rounded={radius.lg} />
+            ) : visible.length === 0 ? (
+                <Card>
+                    <EmptyState icon={Tags} title={t('no_categories_title')} actionLabel={t('new_category')} actionIcon={Plus} onAction={openSheet} />
+                </Card>
+            ) : (
+                <Card padded={false}>
+                    {visible.map((cat, i) => (
+                        <ListRow
+                            key={cat.id}
+                            leading={<CategoryIcon icon={cat.icon} color={cat.color} />}
+                            title={cat.name}
+                            divider={i > 0}
+                            trailing={<IconButton icon={Trash2} label={`${t('delete')} ${cat.name}`} tone="danger" onPress={() => handleDelete(cat.id)} size={36} />}
+                        />
+                    ))}
+                </Card>
+            )}
 
-                    <TextInput
-                        style={[styles.input, { color: colors.text, borderColor: colors.border }]}
-                        placeholder={t('category_name')}
-                        placeholderTextColor={colors.textSecondary}
-                        maxLength={40}
-                        value={newCategoryName}
-                        onChangeText={setNewCategoryName}
+            <Sheet
+                visible={open}
+                onClose={() => setOpen(false)}
+                title={t('new_category')}
+                footer={
+                    <>
+                        <Button label={t('cancel')} variant="secondary" onPress={() => setOpen(false)} style={{ flex: 1 }} />
+                        <Button label={t('save')} icon={Check} onPress={handleAdd} loading={saving} style={{ flex: 1 }} />
+                    </>
+                }
+            >
+                <View style={[styles.preview, { backgroundColor: colors.surfaceMuted }]}>
+                    <CategoryIcon icon={icon} color={color} size={48} />
+                    <Text variant="heading" numberOfLines={1} style={{ flex: 1 }}>{name.trim() || t('category_name')}</Text>
+                </View>
+
+                <TextField
+                    label={t('category_name')}
+                    icon={Tag}
+                    value={name}
+                    onChangeText={(v) => { setName(v); setNameError(null); }}
+                    error={nameError}
+                    maxLength={40}
+                    autoFocus
+                />
+
+                <View style={{ gap: 6 }}>
+                    <Text variant="label" tone="secondary">{t('type')}</Text>
+                    <SegmentedControl<TxType>
+                        value={type}
+                        onChange={setType}
+                        options={[
+                            { value: 'expense', label: t('expense'), tone: 'expense' },
+                            { value: 'income', label: t('income'), tone: 'income' },
+                        ]}
                     />
+                </View>
 
-                    <Text style={[styles.label, { color: colors.textSecondary }]}>{t('type')}</Text>
-                    <View style={styles.row}>
-                        <TouchableOpacity onPress={() => setType('expense')} style={[styles.typeButton, { borderColor: colors.border }, type === 'expense' && { backgroundColor: colors.error }]}>
-                            <Text style={{ color: type === 'expense' ? '#FFF' : colors.text }}>{t('expense')}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={() => setType('income')} style={[styles.typeButton, { borderColor: colors.border }, type === 'income' && { backgroundColor: colors.success }]}>
-                            <Text style={{ color: type === 'income' ? '#FFF' : colors.text }}>{t('income')}</Text>
-                        </TouchableOpacity>
-                    </View>
-
-                    <Text style={[styles.label, { color: colors.textSecondary }]}>{t('icon')}</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerScroll}>
-                        {icons.map(icon => (
-                            <TouchableOpacity key={icon} onPress={() => setSelectedIcon(icon)} style={[styles.pickerItem, { borderColor: colors.border }, selectedIcon === icon && { backgroundColor: colors.secondary, borderColor: colors.primary }]}>
-                                <Ionicons name={icon as any} size={24} color={colors.text} />
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-
-                    <Text style={[styles.label, { color: colors.textSecondary }]}>{t('color')}</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerScroll}>
-                        {palette.map(color => (
-                            <TouchableOpacity key={color} onPress={() => setSelectedColor(color)} style={[styles.colorItem, { backgroundColor: color }, selectedColor === color && { borderWidth: 2, borderColor: colors.text }]} />
-                        ))}
-                    </ScrollView>
-
-                    <View style={styles.modalButtons}>
-                        <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.modalButton}>
-                            <Text style={{ color: colors.text }}>{t('cancel')}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={handleAddCategory} style={[styles.modalButton, { backgroundColor: colors.primary }]}>
-                            <Text style={{ color: '#FFF', fontWeight: 'bold' }}>{t('save')}</Text>
-                        </TouchableOpacity>
+                <View style={{ gap: 6 }}>
+                    <Text variant="label" tone="secondary">{t('icon')}</Text>
+                    <View style={styles.grid} accessibilityRole="radiogroup">
+                        {Object.entries(CATEGORY_ICONS).map(([key, Icon]) => {
+                            const active = icon === key;
+                            return (
+                                <Pressable
+                                    key={key}
+                                    onPress={() => setIcon(key)}
+                                    accessibilityRole="radio"
+                                    accessibilityState={{ checked: active }}
+                                    accessibilityLabel={key}
+                                    style={[styles.iconOption, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primarySoft : colors.surface }]}
+                                >
+                                    <Icon size={20} color={active ? colors.primaryText : colors.textSecondary} />
+                                </Pressable>
+                            );
+                        })}
                     </View>
                 </View>
-            </Modal>
-        </SafeAreaView>
+
+                <View style={{ gap: 6 }}>
+                    <Text variant="label" tone="secondary">{t('color')}</Text>
+                    <View style={styles.grid} accessibilityRole="radiogroup">
+                        {CATEGORY_COLORS.map(c => (
+                            <Pressable
+                                key={c}
+                                onPress={() => setColor(c)}
+                                accessibilityRole="radio"
+                                accessibilityState={{ checked: color === c }}
+                                accessibilityLabel={c}
+                                style={[styles.swatch, { backgroundColor: c }, color === c && { borderColor: colors.text, borderWidth: 3 }]}
+                            >
+                                {color === c && <Check size={16} color="#FFFFFF" strokeWidth={3} />}
+                            </Pressable>
+                        ))}
+                    </View>
+                </View>
+            </Sheet>
+        </Screen>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1 },
-    body: { flex: 1, paddingHorizontal: 20, width: '100%', maxWidth: 640, alignSelf: 'center' },
-    addButton: { padding: 16, borderRadius: 16, alignItems: 'center', marginBottom: 20 },
-    addButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-    list: { paddingBottom: 40 },
-    card: { flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 16, marginBottom: 12 },
-    iconContainer: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
-    categoryName: { flex: 1, fontSize: 16, fontWeight: '600' },
-    categoryType: { fontSize: 12, marginRight: 10, textTransform: 'uppercase' },
-    deleteButton: { padding: 8 },
-
-    modalContainer: { flex: 1, padding: 24, paddingTop: 40, width: '100%', maxWidth: 640, alignSelf: 'center' },
-    modalTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 24 },
-    input: { padding: 16, borderRadius: 12, borderWidth: 1, fontSize: 18, marginBottom: 24 },
-    label: { fontSize: 14, fontWeight: '600', marginBottom: 12 },
-    row: { flexDirection: 'row', gap: 12, marginBottom: 24 },
-    typeButton: { padding: 12, borderRadius: 20, flex: 1, alignItems: 'center', borderWidth: 1 },
-    pickerScroll: { marginBottom: 24, maxHeight: 60 },
-    pickerItem: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center', marginRight: 12, borderWidth: 1 },
-    colorItem: { width: 48, height: 48, borderRadius: 24, marginRight: 12 },
-    modalButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 'auto', marginBottom: 40 },
-    modalButton: { padding: 16, borderRadius: 16, width: '45%', alignItems: 'center' }
-
+    preview: { flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md, borderRadius: radius.lg },
+    grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+    iconOption: { width: 44, height: 44, borderRadius: radius.md, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+    swatch: { width: 36, height: 36, borderRadius: radius.full, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: 'transparent' },
 });

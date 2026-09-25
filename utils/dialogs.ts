@@ -1,14 +1,19 @@
-import { Alert, Platform } from 'react-native';
+// Bridge to the in-app FeedbackProvider (components/ui/Feedback.tsx).
 
-// Alert.alert is a no-op in react-native-web, so fall back to the browser dialogs there.
-
-export const showMessage = (title: string, message?: string) => {
-    if (Platform.OS === 'web') {
-        window.alert(message ? `${title}\n\n${message}` : title);
-    } else {
-        Alert.alert(title, message);
-    }
+type Handlers = {
+    toast: (tone: 'success' | 'error' | 'info', title: string, message?: string) => void;
+    confirm: (title: string, message: string, confirmLabel: string, cancelLabel: string) => Promise<boolean>;
 };
+
+let handlers: Handlers | null = null;
+
+export const setFeedbackHandlers = (next: Handlers) => {
+    handlers = next;
+};
+
+export const showMessage = (title: string, message?: string) => handlers?.toast('error', title, message);
+
+export const showSuccess = (title: string, message?: string) => handlers?.toast('success', title, message);
 
 export const confirmAction = (
     title: string,
@@ -17,12 +22,7 @@ export const confirmAction = (
     cancelText: string,
     onConfirm: () => void
 ) => {
-    if (Platform.OS === 'web') {
-        if (window.confirm(`${title}\n\n${message}`)) onConfirm();
-        return;
-    }
-    Alert.alert(title, message, [
-        { text: cancelText, style: 'cancel' },
-        { text: confirmText, style: 'destructive', onPress: onConfirm },
-    ]);
+    handlers?.confirm(title, message, confirmText, cancelText).then(ok => {
+        if (ok) onConfirm();
+    });
 };

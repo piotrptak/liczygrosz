@@ -105,7 +105,7 @@ export const LocalizationProvider = ({ children }: { children: React.ReactNode }
         currencies: CURRENCIES,
         getCurrencySymbol,
         getCurrencyFlag,
-        formatMoney: (amount, code) => formatMoney(amount, code || currencyCode),
+        formatMoney: (amount, code) => formatMoney(amount, code || currencyCode, locale),
     }), [user, locale, currencyCode, storedCurrency]);
 
     return <LocalizationContext.Provider value={value}>{children}</LocalizationContext.Provider>;

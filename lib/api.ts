@@ -110,22 +110,22 @@ export const deleteCategory = async (id: string) => {
 
 const DEFAULT_CATEGORIES: Record<string, [string, TxType, string, string][]> = {
     en: [
-        ['Salary', 'income', 'cash-outline', '#34C759'],
-        ['Freelance', 'income', 'briefcase-outline', '#30B0C7'],
-        ['Food', 'expense', 'fast-food-outline', '#FF9500'],
-        ['Transport', 'expense', 'car-sport-outline', '#5856D6'],
-        ['Entertainment', 'expense', 'game-controller-outline', '#AF52DE'],
-        ['Shopping', 'expense', 'cart-outline', '#FF2D55'],
-        ['Bills', 'expense', 'receipt-outline', '#FF3B30'],
+        ['Salary', 'income', 'banknote', '#10B981'],
+        ['Freelance', 'income', 'briefcase', '#14B8A6'],
+        ['Food', 'expense', 'utensils', '#F97316'],
+        ['Transport', 'expense', 'car', '#0EA5E9'],
+        ['Entertainment', 'expense', 'gamepad-2', '#A855F7'],
+        ['Shopping', 'expense', 'shopping-cart', '#EC4899'],
+        ['Bills', 'expense', 'receipt', '#EF4444'],
     ],
     pl: [
-        ['Wynagrodzenie', 'income', 'cash-outline', '#34C759'],
-        ['Zlecenia', 'income', 'briefcase-outline', '#30B0C7'],
-        ['Jedzenie', 'expense', 'fast-food-outline', '#FF9500'],
-        ['Transport', 'expense', 'car-sport-outline', '#5856D6'],
-        ['Rozrywka', 'expense', 'game-controller-outline', '#AF52DE'],
-        ['Zakupy', 'expense', 'cart-outline', '#FF2D55'],
-        ['Rachunki', 'expense', 'receipt-outline', '#FF3B30'],
+        ['Wynagrodzenie', 'income', 'banknote', '#10B981'],
+        ['Zlecenia', 'income', 'briefcase', '#14B8A6'],
+        ['Jedzenie', 'expense', 'utensils', '#F97316'],
+        ['Transport', 'expense', 'car', '#0EA5E9'],
+        ['Rozrywka', 'expense', 'gamepad-2', '#A855F7'],
+        ['Zakupy', 'expense', 'shopping-cart', '#EC4899'],
+        ['Rachunki', 'expense', 'receipt', '#EF4444'],
     ],
 };
 

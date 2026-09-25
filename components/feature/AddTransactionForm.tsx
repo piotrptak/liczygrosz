@@ -1,23 +1,28 @@
+import Button from '@/components/ui/Button';
+import Card from '@/components/ui/Card';
+import CategoryIcon from '@/components/ui/CategoryIcon';
 import DateField from '@/components/ui/DateField';
-import { useColorScheme } from '@/components/useColorScheme';
-import Colors from '@/constants/Colors';
+import Screen from '@/components/ui/Screen';
+import SegmentedControl from '@/components/ui/SegmentedControl';
+import Text from '@/components/ui/Text';
+import TextField from '@/components/ui/TextField';
+import { fonts, layout, radius, space, useTheme } from '@/constants/theme';
 import { useLocalization } from '@/context/LocalizationContext';
 import { createTransaction, deleteTransaction, fetchCategories, fetchTransaction, updateTransaction } from '@/lib/api';
 import { invalidateTransactions, keys } from '@/lib/queryClient';
-import { confirmAction, showMessage } from '@/utils/dialogs';
+import { confirmAction, showMessage, showSuccess } from '@/utils/dialogs';
 import { errorKey } from '@/utils/errors';
-import { parseAmount } from '@/utils/money';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import { formatAmountInput, parseAmount } from '@/utils/money';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
+import { ArrowDownLeft, ArrowUpRight, Check, Settings2, StickyNote, Trash2 } from '@/components/ui/icons';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Keyboard, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 export default function AddTransactionForm({ transactionId }: { transactionId?: string }) {
     const router = useRouter();
-    const { t, currencies, currencyCode, getCurrencyFlag } = useLocalization();
-    const colorScheme = useColorScheme();
-    const colors = Colors[colorScheme ?? 'light'];
+    const { t, locale, currencies, currencyCode, getCurrencySymbol } = useLocalization();
+    const { colors } = useTheme();
 
     const isEditing = transactionId !== undefined;
     const amountInputRef = useRef<TextInput>(null);
@@ -28,7 +33,6 @@ export default function AddTransactionForm({ transactionId }: { transactionId?: 
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
     const [noteError, setNoteError] = useState<string | null>(null);
     const [txCurrency, setTxCurrency] = useState(currencyCode);
-    const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
     const [date, setDate] = useState(new Date());
     const [saving, setSaving] = useState(false);
 
@@ -48,7 +52,7 @@ export default function AddTransactionForm({ transactionId }: { transactionId?: 
             router.back();
             return;
         }
-        setAmount(String(existing.amount));
+        setAmount(formatAmountInput(existing.amount, locale));
         setNote(existing.note);
         setType(existing.type);
         setSelectedCategory(existing.category);
@@ -110,6 +114,7 @@ export default function AddTransactionForm({ transactionId }: { transactionId?: 
                 await createTransaction(input);
                 await invalidateTransactions();
                 resetForm();
+                showSuccess(t('transaction_saved'));
                 router.navigate('/(tabs)');
             }
         } catch (error) {
@@ -125,6 +130,7 @@ export default function AddTransactionForm({ transactionId }: { transactionId?: 
             try {
                 await deleteTransaction(transactionId!);
                 await invalidateTransactions();
+                showSuccess(t('transaction_deleted'));
                 router.back();
             } catch (error) {
                 showMessage(t('error'), t(errorKey(error)));
@@ -135,66 +141,42 @@ export default function AddTransactionForm({ transactionId }: { transactionId?: 
     const canSave = !!amount && !!selectedCategory && !saving;
 
     return (
-        <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={{ flex: 1 }}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+        <Screen
+            title={isEditing ? t('edit_transaction') : t('new_transaction')}
+            backTo={isEditing ? '/(tabs)' : undefined}
+            width={layout.formWidth + 80}
+            footer={
+                <>
+                    {isEditing && <Button label={t('delete')} icon={Trash2} variant="dangerSoft" size="lg" onPress={handleDelete} />}
+                    <Button label={t('save')} icon={Check} size="lg" onPress={handleSave} disabled={!canSave} loading={saving} style={{ flex: 1 }} />
+                </>
+            }
         >
-            <ScrollView
-                contentContainerStyle={[styles.container, { backgroundColor: colors.background }]}
-                keyboardShouldPersistTaps="handled"
-            >
-                <View style={styles.headerControl}>
-                    <View style={styles.titleRow}>
-                        {/* The edit screen shows the title in its own header. */}
-                        <Text style={[styles.formTitle, { color: colors.text }]}>
-                            {isEditing ? '' : t('new_transaction')}
-                        </Text>
-                        <DateField value={date} onChange={setDate} />
-                    </View>
+            <SegmentedControl<'expense' | 'income'>
+                value={type}
+                onChange={handleTypeChange}
+                accessibilityLabel={t('type')}
+                options={[
+                    { value: 'expense', label: t('expense'), icon: ArrowUpRight, tone: 'expense' },
+                    { value: 'income', label: t('income'), icon: ArrowDownLeft, tone: 'income' },
+                ]}
+            />
 
-                    <View style={styles.typeSwitcherContainer}>
-                        {(['expense', 'income'] as const).map((option, i) => {
-                            const active = type === option;
-                            const activeColor = option === 'expense' ? colors.error : colors.success;
-                            return (
-                                <TouchableOpacity
-                                    key={option}
-                                    onPress={() => handleTypeChange(option)}
-                                    style={[
-                                        styles.typeButton,
-                                        i === 0 && { marginRight: 16 },
-                                        active ? { backgroundColor: activeColor } : { borderWidth: 1, borderColor: colors.border },
-                                    ]}
-                                >
-                                    <Ionicons
-                                        name={option === 'expense' ? 'arrow-down-circle' : 'arrow-up-circle'}
-                                        size={24}
-                                        color={active ? '#FFF' : colors.textSecondary}
-                                    />
-                                    <Text style={[styles.typeBtnText, { color: active ? '#FFF' : colors.textSecondary }]}>{t(option)}</Text>
-                                </TouchableOpacity>
-                            );
-                        })}
-                    </View>
-                </View>
-
-                {/* Amount Input */}
-                <View style={styles.amountContainer}>
-                    <TouchableOpacity
-                        style={[styles.currencyBadge, { backgroundColor: colors.secondary }]}
-                        onPress={() => setShowCurrencyPicker(v => !v)}
-                    >
-                        <Text style={{ fontSize: 24, marginRight: 4 }}>{getCurrencyFlag(txCurrency)}</Text>
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{txCurrency}</Text>
-                    </TouchableOpacity>
-
+            {/* Amount */}
+            <Card style={styles.amountCard}>
+                <Text variant="overline" tone="muted">{t('amount')}</Text>
+                <View style={styles.amountRow}>
                     <TextInput
                         ref={amountInputRef}
                         autoFocus={!isEditing && Platform.OS !== 'web'}
-                        style={[styles.amountInput, { color: colors.text }]}
-                        placeholder="0"
-                        placeholderTextColor={colors.textSecondary}
+                        accessibilityLabel={t('amount')}
+                        style={[
+                            styles.amountInput,
+                            { color: type === 'income' ? colors.income : colors.text },
+                            Platform.OS === 'web' && ({ outlineStyle: 'none' } as object),
+                        ]}
+                        placeholder="0,00"
+                        placeholderTextColor={colors.borderStrong}
                         keyboardType="decimal-pad"
                         inputMode="decimal"
                         returnKeyType="done"
@@ -202,258 +184,118 @@ export default function AddTransactionForm({ transactionId }: { transactionId?: 
                         onChangeText={(text) => setAmount(text.replace(/[^0-9.,]/g, ''))}
                         maxLength={10}
                     />
+                    <Text variant="title" tone="muted">{getCurrencySymbol(txCurrency)}</Text>
                 </View>
+                <View style={styles.currencyRow} accessibilityRole="radiogroup" accessibilityLabel={t('currency')}>
+                    {currencies.map(c => {
+                        const active = txCurrency === c.code;
+                        return (
+                            <Pressable
+                                key={c.code}
+                                onPress={() => setTxCurrency(c.code)}
+                                accessibilityRole="radio"
+                                accessibilityState={{ checked: active }}
+                                style={[styles.chip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primarySoft : 'transparent' }]}
+                            >
+                                <Text variant="label" tone={active ? 'primary' : 'secondary'}>{c.flag} {c.code}</Text>
+                            </Pressable>
+                        );
+                    })}
+                </View>
+            </Card>
 
-                {showCurrencyPicker && (
-                    <View style={styles.currencySelector}>
-                        {currencies.map(c => {
-                            const active = txCurrency === c.code;
+            {/* Categories */}
+            <View style={{ gap: space.sm }}>
+                <View style={styles.sectionTitle}>
+                    <Text variant="heading" style={{ flex: 1 }}>{t('category')}</Text>
+                    <Button label={t('manage')} icon={Settings2} variant="ghost" size="sm" onPress={() => router.push('/categories/manage')} />
+                </View>
+                {categories.length === 0 ? (
+                    <Card><Text tone="muted">{t('no_categories')}</Text></Card>
+                ) : (
+                    <View style={styles.categoryGrid} accessibilityRole="radiogroup" accessibilityLabel={t('category')}>
+                        {categories.map((cat) => {
+                            const selected = selectedCategory === cat.name;
                             return (
-                                <TouchableOpacity
-                                    key={c.code}
-                                    style={[styles.currencyOption, { backgroundColor: active ? colors.tint : colors.secondary }]}
+                                <Pressable
+                                    key={cat.id}
                                     onPress={() => {
-                                        setTxCurrency(c.code);
-                                        setShowCurrencyPicker(false);
+                                        setSelectedCategory(cat.name);
+                                        Keyboard.dismiss();
+                                    }}
+                                    accessibilityRole="radio"
+                                    accessibilityState={{ checked: selected }}
+                                    accessibilityLabel={cat.name}
+                                    style={(state) => {
+                                        const { hovered } = state as typeof state & { hovered?: boolean };
+                                        return [
+                                            styles.categoryTile,
+                                            {
+                                                backgroundColor: selected ? colors.primarySoft : hovered ? colors.surfaceHover : colors.surface,
+                                                borderColor: selected ? colors.primary : colors.border,
+                                            },
+                                        ];
                                     }}
                                 >
-                                    <Text style={[styles.currencyOptionText, { color: active ? '#FFF' : colors.text }]}>{c.code} ({c.symbol})</Text>
-                                </TouchableOpacity>
+                                    <CategoryIcon icon={cat.icon} color={cat.color} size={36} />
+                                    <Text variant="label" tone={selected ? 'primary' : 'default'} numberOfLines={1} style={{ flex: 1 }}>{cat.name}</Text>
+                                    {selected && <Check size={16} color={colors.primaryText} strokeWidth={2.6} />}
+                                </Pressable>
                             );
                         })}
                     </View>
                 )}
+            </View>
 
-                {/* Note Input */}
-                <View style={[
-                    styles.inputGroup,
-                    { backgroundColor: colors.surface },
-                    noteError ? { backgroundColor: colors.error + '10', borderWidth: 1, borderColor: colors.error } : null,
-                ]}>
-                    <Ionicons name="create-outline" size={20} color={noteError ? colors.error : colors.textSecondary} style={{ marginRight: 10 }} />
-                    <TextInput
-                        style={[styles.textInput, { color: colors.text }]}
-                        placeholder={t('note_placeholder')}
-                        placeholderTextColor={noteError ? colors.error : colors.textSecondary}
-                        value={note}
-                        onChangeText={(text) => {
-                            setNote(text);
-                            if (text.trim()) setNoteError(null);
-                        }}
-                        returnKeyType="done"
-                        maxLength={200}
-                    />
-                </View>
-                {noteError && (
-                    <Text style={[styles.errorText, { color: colors.error }]}>{noteError}</Text>
-                )}
-
-                {/* Categories */}
-                <View style={styles.categorySection}>
-                    <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>{t('category')}</Text>
-                    {categories.length === 0 ? (
-                        <Text style={{ color: colors.textSecondary }}>{t('no_categories')}</Text>
-                    ) : (
-                        <View style={styles.categoryGrid}>
-                            {categories.map((cat) => {
-                                const isSelected = selectedCategory === cat.name;
-                                return (
-                                    <TouchableOpacity
-                                        key={cat.id}
-                                        style={styles.categoryItem}
-                                        onPress={() => {
-                                            setSelectedCategory(cat.name);
-                                            Keyboard.dismiss();
-                                        }}
-                                    >
-                                        <View style={[
-                                            styles.iconCircle,
-                                            { backgroundColor: cat.color || colors.tint, opacity: selectedCategory && !isSelected ? 0.45 : 1 },
-                                            isSelected && { borderWidth: 3, borderColor: colors.text },
-                                        ]}>
-                                            <Ionicons name={(cat.icon as any) || 'ellipse'} size={24} color="#FFF" />
-                                        </View>
-                                        <Text
-                                            numberOfLines={1}
-                                            style={[styles.categoryText, { color: colors.text, fontWeight: isSelected ? '700' : '400' }]}
-                                        >
-                                            {cat.name}
-                                        </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
-                    )}
-                </View>
-
-                <View style={styles.footer}>
-                    <TouchableOpacity
-                        style={[styles.saveButton, { backgroundColor: colors.primary, opacity: canSave ? 1 : 0.5 }]}
-                        onPress={handleSave}
-                        disabled={!canSave}
-                    >
-                        {saving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveButtonText}>{t('save')}</Text>}
-                    </TouchableOpacity>
-                    {isEditing && (
-                        <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
-                            <Ionicons name="trash-outline" size={18} color={colors.error} style={{ marginRight: 6 }} />
-                            <Text style={{ color: colors.error, fontWeight: '600', fontSize: 16 }}>{t('delete')}</Text>
-                        </TouchableOpacity>
-                    )}
-                </View>
-            </ScrollView>
-        </KeyboardAvoidingView>
+            {/* Details */}
+            <View style={{ gap: space.md }}>
+                <Text variant="heading">{t('details')}</Text>
+                <TextField
+                    label={t('note')}
+                    icon={StickyNote}
+                    placeholder={t('note_placeholder')}
+                    value={note}
+                    error={noteError}
+                    onChangeText={(text) => {
+                        setNote(text);
+                        if (text.trim()) setNoteError(null);
+                    }}
+                    returnKeyType="done"
+                    maxLength={200}
+                />
+                <DateField label={t('date')} value={date} onChange={setDate} />
+            </View>
+        </Screen>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flexGrow: 1,
-        padding: 24,
-        width: '100%',
-        maxWidth: 640,
-        alignSelf: 'center',
-    },
-    headerControl: {
-        marginBottom: 30,
-    },
-    titleRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 20,
-        gap: 12,
-    },
-    formTitle: {
-        fontSize: 20,
-        fontWeight: '700',
-        flexShrink: 1,
-    },
-    typeSwitcherContainer: {
-        flexDirection: 'row',
-        width: '100%',
-    },
-    typeButton: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 14,
-        borderRadius: 16,
-    },
-    typeBtnText: {
-        fontSize: 16,
-        fontWeight: '600',
-        marginLeft: 8,
-    },
-    amountContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 32,
-    },
-    currencyBadge: {
-        marginRight: 10,
-        borderRadius: 8,
-        padding: 6,
-        alignItems: 'center',
-    },
+    amountCard: { gap: space.sm, paddingVertical: space.xl },
+    amountRow: { flexDirection: 'row', alignItems: 'baseline', gap: space.sm },
     amountInput: {
-        fontSize: 56,
-        fontWeight: 'bold',
-        fontFamily: 'SpaceMono',
-        minWidth: 50,
-        maxWidth: '75%',
-        textAlign: 'center',
-    },
-    inputGroup: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        borderRadius: 16,
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-        marginBottom: 30,
-    },
-    textInput: {
         flex: 1,
-        fontSize: 16,
-        fontWeight: '500',
+        minWidth: 0,
+        fontSize: 44,
+        lineHeight: 52,
+        fontFamily: fonts.bold,
+        letterSpacing: -1,
+        padding: 0,
+        fontVariant: ['tabular-nums'],
     },
-    errorText: {
-        marginLeft: 16,
-        marginTop: -20,
-        marginBottom: 20,
-        fontSize: 12,
-    },
-    categorySection: {
-        marginBottom: 20,
-    },
-    sectionLabel: {
-        fontSize: 12,
-        fontWeight: '600',
-        textTransform: 'uppercase',
-        marginBottom: 16,
-        letterSpacing: 1,
-    },
-    categoryGrid: {
+    currencyRow: { flexDirection: 'row', gap: space.sm, marginTop: space.xs },
+    chip: { paddingHorizontal: space.md, paddingVertical: 6, borderRadius: radius.full, borderWidth: 1 },
+    sectionTitle: { flexDirection: 'row', alignItems: 'center' },
+    categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+    categoryTile: {
         flexDirection: 'row',
-        flexWrap: 'wrap',
-    },
-    categoryItem: {
         alignItems: 'center',
-        padding: 6,
-        width: '25%',
-        marginBottom: 8,
-    },
-    iconCircle: {
-        width: 52,
-        height: 52,
-        borderRadius: 26,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 6,
-    },
-    categoryText: {
-        fontSize: 11,
-        textAlign: 'center',
-    },
-    footer: {
-        flex: 1,
-        justifyContent: 'flex-end',
-        marginBottom: 20,
-    },
-    saveButton: {
-        width: '100%',
-        height: 56,
-        borderRadius: 28,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    saveButtonText: {
-        color: '#FFF',
-        fontSize: 18,
-        fontWeight: 'bold',
-    },
-    deleteButton: {
-        flexDirection: 'row',
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingVertical: 16,
-        marginTop: 8,
-    },
-    currencySelector: {
-        flexDirection: 'row',
-        justifyContent: 'center',
-        gap: 8,
-        marginTop: -16,
-        marginBottom: 24,
-    },
-    currencyOption: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 20,
-    },
-    currencyOptionText: {
-        fontWeight: '600',
+        gap: space.sm,
+        flexGrow: 1,
+        flexBasis: 150,
+        maxWidth: '100%',
+        padding: space.sm,
+        paddingRight: space.md,
+        borderRadius: radius.md,
+        borderWidth: 1,
     },
 });
