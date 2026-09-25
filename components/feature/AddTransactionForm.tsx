@@ -1,343 +1,296 @@
+import DateField from '@/components/ui/DateField';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { useLocalization } from '@/context/LocalizationContext';
+import { confirmAction, showMessage } from '@/utils/dialogs';
+import { parseAmount } from '@/utils/money';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
+import { Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-export default function AddTransactionForm() {
+type Category = { id: number; name: string; type: string; icon: string | null; color: string | null };
+
+export default function AddTransactionForm({ transactionId }: { transactionId?: number }) {
     const db = useSQLiteContext();
     const router = useRouter();
-    const params = useLocalSearchParams();
-    const { t, currency, countryFlag, currencies, locale, currencyCode, getCurrencyFlag } = useLocalization();
+    const { t, currencies, currencyCode, getCurrencyFlag } = useLocalization();
     const colorScheme = useColorScheme();
     const colors = Colors[colorScheme ?? 'light'];
 
-    const isEditing = !!params.id;
+    const isEditing = transactionId !== undefined;
     const amountInputRef = useRef<TextInput>(null);
 
     const [amount, setAmount] = useState('');
     const [note, setNote] = useState('');
     const [type, setType] = useState<'income' | 'expense'>('expense');
-    const [categories, setCategories] = useState<any[]>([]);
+    const [categories, setCategories] = useState<Category[]>([]);
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-    const [errors, setErrors] = useState<{ amount?: string; category?: string; note?: string }>({});
-
-    // Default currency to context default code
+    const [noteError, setNoteError] = useState<string | null>(null);
     const [txCurrency, setTxCurrency] = useState(currencyCode);
-    const [showCurrencyModal, setShowCurrencyModal] = useState(false);
-
-    // Date State
+    const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
     const [date, setDate] = useState(new Date());
-    const [showDatePicker, setShowDatePicker] = useState(false);
 
-    // Replace useEffect for loading categories with useFocusEffect
-    useFocusEffect(
-        useCallback(() => {
-            loadCategories();
-        }, [type]) // Reload when type changes or screen focuses
-    );
+    const loadCategories = useCallback(async () => {
+        const result = await db.getAllAsync<Category>('SELECT * FROM categories WHERE type = ? ORDER BY name', [type]);
+        setCategories(result);
+    }, [db, type]);
+
+    // Reload on focus as categories may have been edited in the meantime.
+    useFocusEffect(useCallback(() => { loadCategories(); }, [loadCategories]));
 
     useEffect(() => {
-        if (isEditing) {
-            setAmount(params.amount?.toString() || '');
-            setNote(params.note?.toString() || '');
-            setType(params.type as 'income' | 'expense' || 'expense');
-            setSelectedCategory(params.category?.toString() || null);
-            if (params.currency) setTxCurrency(params.currency.toString());
-            if (params.date) {
-                setDate(new Date(parseInt(params.date.toString())));
+        if (!isEditing) return;
+        (async () => {
+            const tx = await db.getFirstAsync<any>('SELECT * FROM transactions WHERE id = ?', [transactionId!]);
+            if (!tx) {
+                showMessage(t('error'), t('transaction_not_found'));
+                router.back();
+                return;
             }
-        } else {
-            // New Transaction: Sync with Profile Currency if user hasn't started editing
-            // Or just always reset to default when opening fresh?
-            // Params.id dependency handles fresh opens if unique key / unmount. 
-            // But if screen stays mounted and focus returns, we might want this.
-            // For now: Just ensure initial load on mount respects it, 
-            // AND watch currencyCode changes while on screen (if global context updates)
-            if (!amount) { // Only override if form is somewhat fresh?
-                setTxCurrency(currencyCode);
-            }
+            setAmount(String(tx.amount));
+            setNote(tx.note ?? '');
+            setType(tx.type);
+            setSelectedCategory(tx.category);
+            setTxCurrency(tx.currency || currencyCode);
+            setDate(new Date(tx.date));
+        })();
+    }, [transactionId]);
 
-            // Auto-focus amount on new transaction
-            setTimeout(() => {
-                amountInputRef.current?.focus();
-            }, 100);
-        }
-    }, [params.id, currencyCode]); // Added currencyCode dependency
+    // A new transaction follows the default currency from Profile.
+    useEffect(() => {
+        if (!isEditing) setTxCurrency(currencyCode);
+    }, [currencyCode]);
 
-    // ...
+    const resetForm = () => {
+        setAmount('');
+        setNote('');
+        setSelectedCategory(null);
+        setNoteError(null);
+        setDate(new Date());
+        setTxCurrency(currencyCode);
+    };
 
-    const loadCategories = async () => {
-        const result = await db.getAllAsync('SELECT * FROM categories WHERE type = ?', [type]);
-        setCategories(result);
+    const handleTypeChange = (next: 'income' | 'expense') => {
+        if (next === type) return;
+        setType(next);
+        setSelectedCategory(null);
     };
 
     const handleSave = async () => {
-        const parsedAmount = parseFloat(amount.replace(',', '.')); // Handle commas if user types them
-
+        const parsedAmount = parseAmount(amount);
         if (isNaN(parsedAmount) || parsedAmount <= 0) {
-            Alert.alert('Error', 'Please enter a valid amount');
+            showMessage(t('error'), t('invalid_amount'));
             return;
         }
-
         if (!selectedCategory) {
-            Alert.alert('Error', 'Please select a category');
+            showMessage(t('error'), t('select_category_error'));
             return;
         }
-
-        if (!selectedCategory) {
-            Alert.alert('Error', 'Please select a category');
-            return;
-        }
-
         if (!note.trim()) {
-            setErrors({ note: t('note_required') || 'Note is mandatory' });
+            setNoteError(t('note_required'));
             return;
         }
-        setErrors({}); // Clear errors
 
         try {
             if (isEditing) {
                 await db.runAsync(
                     'UPDATE transactions SET amount = ?, type = ?, category = ?, note = ?, date = ?, currency = ? WHERE id = ?',
-                    [parsedAmount, type, selectedCategory, note, date.getTime(), txCurrency, Number(params.id)]
+                    [parsedAmount, type, selectedCategory, note.trim(), date.getTime(), txCurrency, transactionId!]
                 );
+                router.back();
             } else {
                 await db.runAsync(
                     'INSERT INTO transactions (amount, type, category, date, note, currency) VALUES (?, ?, ?, ?, ?, ?)',
-                    [parsedAmount, type, selectedCategory, date.getTime(), note, txCurrency]
+                    [parsedAmount, type, selectedCategory, date.getTime(), note.trim(), txCurrency]
                 );
+                resetForm();
+                router.navigate('/(tabs)');
             }
-            router.replace('/(tabs)');
         } catch (error) {
             console.error(error);
-            Alert.alert('Error', 'Failed to save transaction');
+            showMessage(t('error'), t('save_failed'));
         }
     };
 
-    const onDateChange = (event: any, selectedDate?: Date) => {
-        const currentDate = selectedDate || date;
-        setShowDatePicker(Platform.OS === 'ios');
-        setDate(currentDate);
+    const handleDelete = () => {
+        confirmAction(t('delete_transaction_title'), t('delete_transaction_message'), t('delete'), t('cancel'), async () => {
+            await db.runAsync('DELETE FROM transactions WHERE id = ?', [transactionId!]);
+            router.back();
+        });
     };
 
-    const renderIcon = (iconName: any, isSelected: boolean) => {
-        return <Ionicons name={iconName || 'ellipse'} size={24} color={isSelected ? '#FFF' : colors.text} />;
-    };
+    const canSave = !!amount && !!selectedCategory;
 
     return (
         <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             style={{ flex: 1 }}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
         >
-            <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-                <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }]}>
-
-                    {/* Top Row: Type Switcher & Date */}
-                    {/* Top Row: Date & Type Switcher */
-                        /* Date moved to own row or top right? Actually, let's keep it clean. */
-                    }
-                    <View style={styles.headerControl}>
-                        {/* Date Badge - moved to top right absolute or just above */}
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20, alignItems: 'center' }}>
-                            <Text style={{ fontSize: 20, fontWeight: '700', color: colors.text }}>
-                                {isEditing ? t('edit_transaction') : t('new_transaction')}
-                            </Text>
-                            <TouchableOpacity onPress={() => setShowDatePicker(true)} style={styles.dateBadge}>
-                                <Ionicons name="calendar" size={16} color={colors.textSecondary} style={{ marginRight: 6 }} />
-                                <Text style={{ color: colors.textSecondary, fontSize: 14, fontWeight: '600' }}>
-                                    {date.toLocaleDateString()}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        <View style={styles.typeSwitcherContainer}>
-                            <TouchableOpacity
-                                onPress={() => setType('expense')}
-                                style={[
-                                    styles.typeButton,
-                                    type === 'expense' ? { backgroundColor: colors.error, borderWidth: 0 } : { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border }
-                                ]}
-                            >
-                                <Ionicons name="arrow-down-circle" size={24} color={type === 'expense' ? '#FFF' : colors.textSecondary} />
-                                <Text style={[styles.typeBtnText, { color: type === 'expense' ? '#FFF' : colors.textSecondary }]}>{t('expense')}</Text>
-                            </TouchableOpacity>
-
-                            <View style={{ width: 16 }} />
-
-                            <TouchableOpacity
-                                onPress={() => setType('income')}
-                                style={[
-                                    styles.typeButton,
-                                    type === 'income' ? { backgroundColor: colors.success, borderWidth: 0 } : { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border }
-                                ]}
-                            >
-                                <Ionicons name="arrow-up-circle" size={24} color={type === 'income' ? '#FFF' : colors.textSecondary} />
-                                <Text style={[styles.typeBtnText, { color: type === 'income' ? '#FFF' : colors.textSecondary }]}>{t('income')}</Text>
-                            </TouchableOpacity>
-                        </View>
+            <ScrollView
+                contentContainerStyle={[styles.container, { backgroundColor: colors.background }]}
+                keyboardShouldPersistTaps="handled"
+            >
+                <View style={styles.headerControl}>
+                    <View style={styles.titleRow}>
+                        {/* The edit screen shows the title in its own header. */}
+                        <Text style={[styles.formTitle, { color: colors.text }]}>
+                            {isEditing ? '' : t('new_transaction')}
+                        </Text>
+                        <DateField value={date} onChange={setDate} />
                     </View>
 
-                    {showDatePicker && (
-                        <DateTimePicker
-                            testID="dateTimePicker"
-                            value={date}
-                            mode="date"
-                            display="default"
-                            onChange={onDateChange}
-                        />
-                    )}
-
-                    {/* Amount Input */}
-                    <View style={styles.amountContainer}>
-                        <TouchableOpacity style={styles.currencyBadge} onPress={() => setShowCurrencyModal(true)}>
-                            <Text style={{ fontSize: 24, marginRight: 4 }}>{getCurrencyFlag(txCurrency)}</Text>
-                            <Text style={{ fontSize: 12, fontWeight: '700' }}>{txCurrency}</Text>
-                        </TouchableOpacity>
-                        {/* No longer showing currency symbol separately, using badge to show current selection code */}
-
-                        <TextInput
-                            ref={amountInputRef}
-                            style={[styles.amountInput, { color: colors.text }]}
-                            placeholder="0"
-                            placeholderTextColor={colors.textSecondary}
-                            keyboardType="decimal-pad"
-                            returnKeyType="done"
-                            value={amount}
-                            onChangeText={setAmount}
-                            maxLength={10}
-                        />
+                    <View style={styles.typeSwitcherContainer}>
+                        {(['expense', 'income'] as const).map((option, i) => {
+                            const active = type === option;
+                            const activeColor = option === 'expense' ? colors.error : colors.success;
+                            return (
+                                <TouchableOpacity
+                                    key={option}
+                                    onPress={() => handleTypeChange(option)}
+                                    style={[
+                                        styles.typeButton,
+                                        i === 0 && { marginRight: 16 },
+                                        active ? { backgroundColor: activeColor } : { borderWidth: 1, borderColor: colors.border },
+                                    ]}
+                                >
+                                    <Ionicons
+                                        name={option === 'expense' ? 'arrow-down-circle' : 'arrow-up-circle'}
+                                        size={24}
+                                        color={active ? '#FFF' : colors.textSecondary}
+                                    />
+                                    <Text style={[styles.typeBtnText, { color: active ? '#FFF' : colors.textSecondary }]}>{t(option)}</Text>
+                                </TouchableOpacity>
+                            );
+                        })}
                     </View>
+                </View>
 
-                    {/* Currency Modal (Simple Implementation inside component for speed) */}
-                    {showCurrencyModal && (
-                        <View style={styles.currencySelector}>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                                {currencies.map(c => (
+                {/* Amount Input */}
+                <View style={styles.amountContainer}>
+                    <TouchableOpacity
+                        style={[styles.currencyBadge, { backgroundColor: colors.secondary }]}
+                        onPress={() => setShowCurrencyPicker(v => !v)}
+                    >
+                        <Text style={{ fontSize: 24, marginRight: 4 }}>{getCurrencyFlag(txCurrency)}</Text>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>{txCurrency}</Text>
+                    </TouchableOpacity>
+
+                    <TextInput
+                        ref={amountInputRef}
+                        autoFocus={!isEditing && Platform.OS !== 'web'}
+                        style={[styles.amountInput, { color: colors.text }]}
+                        placeholder="0"
+                        placeholderTextColor={colors.textSecondary}
+                        keyboardType="decimal-pad"
+                        inputMode="decimal"
+                        returnKeyType="done"
+                        value={amount}
+                        onChangeText={(text) => setAmount(text.replace(/[^0-9.,]/g, ''))}
+                        maxLength={10}
+                    />
+                </View>
+
+                {showCurrencyPicker && (
+                    <View style={styles.currencySelector}>
+                        {currencies.map(c => {
+                            const active = txCurrency === c.code;
+                            return (
+                                <TouchableOpacity
+                                    key={c.code}
+                                    style={[styles.currencyOption, { backgroundColor: active ? colors.tint : colors.secondary }]}
+                                    onPress={() => {
+                                        setTxCurrency(c.code);
+                                        setShowCurrencyPicker(false);
+                                    }}
+                                >
+                                    <Text style={[styles.currencyOptionText, { color: active ? '#FFF' : colors.text }]}>{c.code} ({c.symbol})</Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </View>
+                )}
+
+                {/* Note Input */}
+                <View style={[
+                    styles.inputGroup,
+                    { backgroundColor: colors.surface },
+                    noteError ? { backgroundColor: colors.error + '10', borderWidth: 1, borderColor: colors.error } : null,
+                ]}>
+                    <Ionicons name="create-outline" size={20} color={noteError ? colors.error : colors.textSecondary} style={{ marginRight: 10 }} />
+                    <TextInput
+                        style={[styles.textInput, { color: colors.text }]}
+                        placeholder={t('note_placeholder')}
+                        placeholderTextColor={noteError ? colors.error : colors.textSecondary}
+                        value={note}
+                        onChangeText={(text) => {
+                            setNote(text);
+                            if (text.trim()) setNoteError(null);
+                        }}
+                        returnKeyType="done"
+                        maxLength={200}
+                    />
+                </View>
+                {noteError && (
+                    <Text style={[styles.errorText, { color: colors.error }]}>{noteError}</Text>
+                )}
+
+                {/* Categories */}
+                <View style={styles.categorySection}>
+                    <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>{t('category')}</Text>
+                    {categories.length === 0 ? (
+                        <Text style={{ color: colors.textSecondary }}>{t('no_categories')}</Text>
+                    ) : (
+                        <View style={styles.categoryGrid}>
+                            {categories.map((cat) => {
+                                const isSelected = selectedCategory === cat.name;
+                                return (
                                     <TouchableOpacity
-                                        key={c.code}
-                                        style={[styles.currencyOption, txCurrency === c.code && { backgroundColor: colors.tint }]}
+                                        key={cat.id}
+                                        style={styles.categoryItem}
                                         onPress={() => {
-                                            setTxCurrency(c.code);
-                                            setShowCurrencyModal(false);
+                                            setSelectedCategory(cat.name);
+                                            Keyboard.dismiss();
                                         }}
                                     >
-                                        <Text style={[styles.currencyOptionText, txCurrency === c.code && { color: '#FFF' }]}>{c.code} ({c.symbol})</Text>
+                                        <View style={[
+                                            styles.iconCircle,
+                                            { backgroundColor: cat.color || colors.tint, opacity: selectedCategory && !isSelected ? 0.45 : 1 },
+                                            isSelected && { borderWidth: 3, borderColor: colors.text },
+                                        ]}>
+                                            <Ionicons name={(cat.icon as any) || 'ellipse'} size={24} color="#FFF" />
+                                        </View>
+                                        <Text
+                                            numberOfLines={1}
+                                            style={[styles.categoryText, { color: colors.text, fontWeight: isSelected ? '700' : '400' }]}
+                                        >
+                                            {cat.name}
+                                        </Text>
                                     </TouchableOpacity>
-                                ))}
-                            </ScrollView>
+                                );
+                            })}
                         </View>
                     )}
+                </View>
 
-                    {/* Note Input */}
-                    <View style={[
-                        styles.inputGroup,
-                        { backgroundColor: colors.surface },
-                        errors.note ? { backgroundColor: colors.error + '10', borderWidth: 1, borderColor: colors.error } : {}
-                    ]}>
-                        <Ionicons name="create-outline" size={20} color={errors.note ? colors.error : colors.textSecondary} style={{ marginRight: 10 }} />
-                        <TextInput
-                            style={[styles.textInput, { color: colors.text }]}
-                            placeholder={t('note') + " (Required)" || "Add a note... (Required)"}
-                            placeholderTextColor={errors.note ? colors.error : colors.textSecondary}
-                            value={note}
-                            onChangeText={(text) => {
-                                setNote(text);
-                                if (text.trim()) setErrors({});
-                            }}
-                            returnKeyType="done"
-                        />
-                    </View>
-                    {errors.note && (
-                        <Text style={{ color: colors.error, marginLeft: 16, marginTop: -20, marginBottom: 20, fontSize: 12 }}>
-                            {errors.note}
-                        </Text>
-                    )}
-
-                    {/* Categories */}
-                    <View style={styles.categorySection}>
-                        <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>{t('category') || 'Category'}</Text>
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={{ paddingHorizontal: 4 }}
-                            style={styles.categoryScroll}
-                        >
-                            {/* Chunk categories into groups of 2 */
-                                Array.from({ length: Math.ceil(categories.length / 2) }).map((_, i) => {
-                                    const chunk = categories.slice(i * 2, i * 2 + 2);
-                                    return (
-                                        <View key={i} style={{ marginRight: 16 }}>
-                                            {chunk.map((cat) => {
-                                                const isSelected = selectedCategory === cat.name;
-                                                const iconBg = cat.color;
-
-                                                return (
-                                                    <TouchableOpacity
-                                                        key={cat.id}
-                                                        style={[
-                                                            styles.categoryItem,
-                                                            isSelected && { transform: [{ scale: 1.05 }] },
-                                                            { marginBottom: 12 } // Add spacing between rows
-                                                        ]}
-                                                        onPress={() => {
-                                                            setSelectedCategory(cat.name);
-                                                            Keyboard.dismiss();
-                                                        }}
-                                                    >
-                                                        <View style={[
-                                                            styles.iconCircle,
-                                                            {
-                                                                backgroundColor: iconBg,
-                                                                shadowColor: cat.color,
-                                                                shadowOpacity: isSelected ? 0.4 : 0.1,
-                                                                shadowRadius: isSelected ? 8 : 4
-                                                            }
-                                                        ]}>
-                                                            {renderIcon(cat.icon, true)}
-                                                        </View>
-                                                        <Text
-                                                            numberOfLines={1}
-                                                            style={[
-                                                                styles.categoryText,
-                                                                {
-                                                                    color: colors.text,
-                                                                    fontWeight: isSelected ? '700' : '400'
-                                                                }
-                                                            ]}
-                                                        >
-                                                            {cat.name}
-                                                        </Text>
-                                                        {isSelected && (
-                                                            <View style={{ height: 4, width: 4, borderRadius: 2, backgroundColor: cat.color, marginTop: 4 }} />
-                                                        )}
-                                                    </TouchableOpacity>
-                                                );
-                                            })}
-                                        </View>
-                                    );
-                                })}
-                        </ScrollView>
-                    </View>
-
-                    {/* Save Button */}
-                    <View style={{ flex: 1, justifyContent: 'flex-end', marginBottom: 20 }}>
-                        <TouchableOpacity
-                            style={[styles.saveButton, { backgroundColor: colors.primary, opacity: (!amount || !selectedCategory) ? 0.5 : 1 }]}
-                            onPress={handleSave}
-                            disabled={!amount || !selectedCategory}
-                        >
-                            <Text style={styles.saveButtonText}>{t('save') || 'Save Transaction'}</Text>
+                <View style={styles.footer}>
+                    <TouchableOpacity
+                        style={[styles.saveButton, { backgroundColor: colors.primary, opacity: canSave ? 1 : 0.5 }]}
+                        onPress={handleSave}
+                        disabled={!canSave}
+                    >
+                        <Text style={styles.saveButtonText}>{t('save')}</Text>
+                    </TouchableOpacity>
+                    {isEditing && (
+                        <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
+                            <Ionicons name="trash-outline" size={18} color={colors.error} style={{ marginRight: 6 }} />
+                            <Text style={{ color: colors.error, fontWeight: '600', fontSize: 16 }}>{t('delete')}</Text>
                         </TouchableOpacity>
-                    </View>
-
-                </ScrollView>
-            </TouchableWithoutFeedback>
+                    )}
+                </View>
+            </ScrollView>
         </KeyboardAvoidingView>
     );
 }
@@ -346,9 +299,24 @@ const styles = StyleSheet.create({
     container: {
         flexGrow: 1,
         padding: 24,
+        width: '100%',
+        maxWidth: 640,
+        alignSelf: 'center',
     },
     headerControl: {
         marginBottom: 30,
+    },
+    titleRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 20,
+        gap: 12,
+    },
+    formTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+        flexShrink: 1,
     },
     typeSwitcherContainer: {
         flexDirection: 'row',
@@ -367,38 +335,24 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         marginLeft: 8,
     },
-    dateBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(0,0,0,0.05)',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 20,
-    },
     amountContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: 40,
+        marginBottom: 32,
     },
     currencyBadge: {
         marginRight: 10,
-        backgroundColor: 'rgba(0,0,0,0.05)',
         borderRadius: 8,
-        padding: 4,
-    },
-    currencySymbol: {
-        fontSize: 32,
-        fontWeight: '500',
-        fontFamily: 'SpaceMono',
-        marginRight: 5,
-        marginTop: 10,
+        padding: 6,
+        alignItems: 'center',
     },
     amountInput: {
-        fontSize: 64,
+        fontSize: 56,
         fontWeight: 'bold',
         fontFamily: 'SpaceMono',
         minWidth: 50,
+        maxWidth: '75%',
         textAlign: 'center',
     },
     inputGroup: {
@@ -408,17 +362,17 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 14,
         marginBottom: 30,
-        // Soft Shadow
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.03,
-        shadowRadius: 8,
-        elevation: 1,
     },
     textInput: {
         flex: 1,
         fontSize: 16,
         fontWeight: '500',
+    },
+    errorText: {
+        marginLeft: 16,
+        marginTop: -20,
+        marginBottom: 20,
+        fontSize: 12,
     },
     categorySection: {
         marginBottom: 20,
@@ -430,15 +384,15 @@ const styles = StyleSheet.create({
         marginBottom: 16,
         letterSpacing: 1,
     },
-    categoryScroll: {
-        flexGrow: 0,
+    categoryGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
     },
     categoryItem: {
         alignItems: 'center',
-        // marginRight: 16, // Moved to container
-        padding: 8,
-        borderRadius: 16,
-        width: 76,
+        padding: 6,
+        width: '25%',
+        marginBottom: 8,
     },
     iconCircle: {
         width: 52,
@@ -446,11 +400,16 @@ const styles = StyleSheet.create({
         borderRadius: 26,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 8,
+        marginBottom: 6,
     },
     categoryText: {
         fontSize: 11,
         textAlign: 'center',
+    },
+    footer: {
+        flex: 1,
+        justifyContent: 'flex-end',
+        marginBottom: 20,
     },
     saveButton: {
         width: '100%',
@@ -458,29 +417,32 @@ const styles = StyleSheet.create({
         borderRadius: 28,
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 10,
-        elevation: 3,
     },
     saveButtonText: {
         color: '#FFF',
         fontSize: 18,
         fontWeight: 'bold',
     },
-    currencySelector: {
-        marginBottom: 20,
+    deleteButton: {
+        flexDirection: 'row',
+        justifyContent: 'center',
         alignItems: 'center',
+        paddingVertical: 16,
+        marginTop: 8,
+    },
+    currencySelector: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        gap: 8,
+        marginTop: -16,
+        marginBottom: 24,
     },
     currencyOption: {
         paddingHorizontal: 16,
         paddingVertical: 8,
         borderRadius: 20,
-        backgroundColor: 'rgba(0,0,0,0.05)',
-        marginHorizontal: 4,
     },
     currencyOptionText: {
         fontWeight: '600',
-    }
+    },
 });

@@ -4,18 +4,15 @@ const { getDefaultConfig } = require('expo/metro-config');
 /** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
 
-// Configure usage of SQLite on the web
-config.resolver.sourceExts.push('sql'); // Ensure sql is treated as source if needed
-// config.resolver.assetExts.push('db'); // db files are assets
-// config.resolver.assetExts.push('wasm'); // wasm files are assets
+// expo-sqlite on the web loads a WebAssembly build of SQLite.
+config.resolver.assetExts.push('wasm');
 
-// Correct way to handle expo-sqlite on web usually involves correct resolution
-// For expo-sqlite/next (which is what usually uses wasm), we need to ensure wasm is an asset
-const { resolver } = config;
-
-config.resolver = {
-    ...resolver,
-    assetExts: [...resolver.assetExts, 'wasm', 'db', 'sqlite'],
+// expo-sqlite on the web needs SharedArrayBuffer, which requires cross-origin isolation.
+// In production the service worker (public/sw.js) adds these headers.
+config.server.enhanceMiddleware = (middleware) => (req, res, next) => {
+  res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  return middleware(req, res, next);
 };
 
 module.exports = config;

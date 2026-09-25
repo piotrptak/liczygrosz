@@ -3,9 +3,10 @@
     "name": "LiczyGrosz",
     "slug": "liczygrosz",
     "version": "1.0.0",
+    "description": "Prosty, prywatny tracker wydatków. Dane zostają na Twoim urządzeniu.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "com.liczygrosz",
+    "scheme": "liczygrosz",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -14,9 +15,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.liczygrosz.app"
     },
     "android": {
+      "package": "com.liczygrosz.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -26,8 +29,13 @@
     },
     "web": {
       "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "output": "single",
+      "favicon": "./assets/images/favicon.png",
+      "name": "LiczyGrosz",
+      "shortName": "LiczyGrosz",
+      "lang": "pl",
+      "themeColor": "#5856D6",
+      "backgroundColor": "#F2F2F7"
     },
     "plugins": [
       "expo-router",

@@ -1,20 +1,20 @@
-import { Link, Stack } from 'expo-router';
-import { StyleSheet } from 'react-native';
-
-import { Text, View } from '@/components/Themed';
+import { useColorScheme } from '@/components/useColorScheme';
+import Colors from '@/constants/Colors';
+import { useLocalization } from '@/context/LocalizationContext';
+import { Link } from 'expo-router';
+import { StyleSheet, Text, View } from 'react-native';
 
 export default function NotFoundScreen() {
-  return (
-    <>
-      <Stack.Screen options={{ title: 'Oops!' }} />
-      <View style={styles.container}>
-        <Text style={styles.title}>This screen doesn't exist.</Text>
+  const colors = Colors[useColorScheme() ?? 'light'];
+  const { t } = useLocalization();
 
-        <Link href="/" style={styles.link}>
-          <Text style={styles.linkText}>Go to home screen!</Text>
-        </Link>
-      </View>
-    </>
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Text style={[styles.title, { color: colors.text }]}>{t('not_found')}</Text>
+      <Link href="/" style={[styles.link, { color: colors.tint }]}>
+        {t('go_home')}
+      </Link>
+    </View>
   );
 }
 
@@ -32,9 +32,6 @@ const styles = StyleSheet.create({
   link: {
     marginTop: 15,
     paddingVertical: 15,
-  },
-  linkText: {
-    fontSize: 14,
-    color: '#2e78b7',
+    fontSize: 16,
   },
 });

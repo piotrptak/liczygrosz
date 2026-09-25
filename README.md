@@ -1,211 +1,76 @@
 # 🐷 LiczyGrosz
 
-**LiczyGrosz** (Polish for "Penny Counter") is a modern, feature-rich expense tracking mobile application built with React Native and Expo. Track your income and expenses with style, gain insights into your spending habits, and manage your finances across multiple currencies.
+**LiczyGrosz** (Polish for "Penny Counter") is a private, offline-first expense tracker built with React Native and Expo. It runs as an installable web app (PWA) and on iOS/Android. All data stays on the device: there is no account, no server and no tracking.
 
 ## ✨ Features
 
-### 💰 Transaction Management
-- **Quick Entry**: Add income and expenses with an intuitive interface
-- **Smart Categories**: Pre-configured categories with custom icons and colors
-- **Flexible Notes**: Add detailed descriptions to your transactions
-- **Edit & Delete**: Full control over your transaction history
+- **Transactions** – add, edit and delete income and expenses with category, note, date and currency
+- **Monthly dashboard** – balance, income and expense per month, with income/expense filters
+- **Multi-currency** – PLN, EUR and USD; totals are kept per currency and never mixed without conversion
+- **Recurring items** – weekly or monthly schedules; due occurrences are booked automatically when the app starts (missed periods are caught up)
+- **Statistics** – current month result and a 6-month expense trend in the default currency
+- **Categories** – custom icons and colors; defaults are seeded in the device language
+- **Polish and English** – language and default currency are remembered
+- **CSV export** – backup of all transactions (UTF-8, opens in Excel)
+- **Dark mode**, installable PWA and offline support
 
-### 📊 Statistics & Insights
-- **Monthly Expense Trends**: Visualize your spending patterns over the last 6 months
-- **Savings Suggestions**: Get real-time calculations of potential savings based on current month's income vs expenses
-- **Interactive Charts**: Beautiful line charts powered by react-native-chart-kit
+## 🚀 Getting started
 
-### 💱 Multi-Currency Support
-- **Three Major Currencies**: USD ($), EUR (€), and PLN (zł)
-- **Per-Transaction Currency**: Set different currencies for individual transactions
-- **Default Currency**: Configure your preferred currency in profile settings
-- **Smart Currency Detection**: Automatically suggests currency based on your locale
-
-### 🔁 Recurring Transactions
-- **Automated Tracking**: Set up weekly or monthly recurring income/expenses
-- **Auto-Processing**: Recurring transactions are automatically added when due
-- **Easy Management**: View and edit all recurring items in one place
-
-### 🌍 Internationalization
-- **Bilingual Support**: Full Polish and English translations
-- **Locale-Aware**: Date formatting and currency symbols adapt to your language
-- **Easy Switching**: Change language anytime from profile settings
-
-### 🎨 Premium Design
-- **Dark Mode Support**: Seamless light and dark theme switching
-- **Modern UI**: Clean, colorful interface with smooth animations
-- **Custom Branding**: Unique LiczyGrosz piggy bank icon
-- **Responsive Layout**: Optimized for various screen sizes
-
-### 🔐 Authentication
-- **Auth0 Universal Login**: Secure, production-ready authentication
-- **Persistent Sessions**: Stay logged in across app restarts
-- **Easy Sign Up/Login**: Hosted login page with email/password support
-- **Future Social Login**: Ready for Google and Facebook integration
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Node.js (v16 or higher)
-- npm or yarn
-- Expo CLI (`npm install -g expo-cli`)
-- iOS Simulator (Mac) or Android Emulator
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/piotrptak/liczygrosz.git
-   cd liczygrosz
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Start the development server**
-   ```bash
-   npx expo start
-   ```
-
-4. **Run on your device**
-   - Press `i` for iOS simulator
-   - Press `a` for Android emulator
-   - Scan QR code with Expo Go app on your physical device
-
-### Auth0 Setup (Required for Authentication)
-
-1. **Create Auth0 Account**
-   - Sign up at [auth0.com](https://auth0.com)
-   - Create a new tenant (e.g., "liczygrosz")
-
-2. **Create Application**
-   - Go to **Applications** → **Create Application**
-   - Name: "LiczyGrosz Mobile"
-   - Type: **Native**
-   - Copy your **Domain** and **Client ID**
-
-3. **Configure Application**
-   - In your application settings, find **Allowed Callback URLs**
-   - Add: `https://auth.expo.io/@your-username/liczygrosz`
-   - Find **Allowed Logout URLs**
-   - Add the same URL: `https://auth.expo.io/@your-username/liczygrosz`
-   - Click **Save Changes**
-
-4. **Update App Configuration**
-   - Open `config/auth0-config.ts`
-   - Replace with your Auth0 credentials:
-   ```typescript
-   export const auth0Config = {
-     domain: 'your-tenant.us.auth0.com',
-     clientId: 'your-client-id',
-   };
-   ```
-
-5. **Enable Sign-ups** (Optional)
-   - Go to **Authentication** → **Database** → **Username-Password-Authentication**
-   - Ensure **"Disable Sign Ups"** is **OFF**
-   - Configure password requirements as needed
-
-## 📱 Usage
-
-### First Time Setup
-1. Launch the app and you'll see the login screen
-2. Sign in using Google, Facebook, or Instagram (mock authentication for demo)
-3. You'll be taken to the Dashboard
-
-### Adding Transactions
-1. Tap the **"Dodaj"** (Add) tab at the bottom
-2. Select transaction type: **Wydatek** (Expense) or **Przychód** (Income)
-3. Enter the amount using the keypad
-4. Choose a category
-5. Add a note (mandatory)
-6. Select currency if different from default
-7. Tap **"Zapisz"** (Save)
-
-### Viewing Statistics
-1. Navigate to the **"Wykresy"** (Stats) tab
-2. View your monthly expense trend chart
-3. Check your savings suggestion based on current month's activity
-
-### Managing Categories
-1. Go to **"Profil"** (Profile) tab
-2. Tap **"Kategorie"** (Categories)
-3. Add, edit, or delete custom categories
-
-### Setting Up Recurring Transactions
-1. From Profile, tap **"Cykliczne"** (Recurring)
-2. Add new recurring items with frequency (weekly/monthly)
-3. The app automatically processes them when due
-
-## 🛠️ Tech Stack
-
-- **Framework**: React Native with Expo
-- **Database**: SQLite (expo-sqlite)
-- **Navigation**: Expo Router
-- **Charts**: react-native-chart-kit
-- **Internationalization**: i18n-js
-- **Date Handling**: date-fns
-- **Icons**: Expo Vector Icons (Ionicons)
-
-## 📂 Project Structure
-
-```
-expense-tracker/
-├── app/                      # App screens and routes
-│   ├── (tabs)/              # Tab navigation screens
-│   ├── categories/          # Category management
-│   ├── recurring/           # Recurring transactions
-│   └── login.tsx            # Authentication screen
-├── components/
-│   ├── feature/             # Feature components (forms, lists)
-│   └── ui/                  # Reusable UI components
-├── context/                 # React Context providers
-│   ├── AuthContext.tsx      # Authentication state
-│   └── LocalizationContext.tsx  # i18n and currency
-├── db/                      # Database setup and migrations
-├── locales/                 # Translation files (en, pl)
-├── utils/                   # Utility functions
-└── assets/                  # Images and fonts
+```bash
+npm install
+npm run web        # web (http://localhost:8081)
+npm run android    # Android emulator / Expo Go
+npm run ios        # iOS simulator / Expo Go
 ```
 
-## 🎯 Key Features Explained
+Other scripts:
 
-### Savings Calculation Algorithm
-The savings suggestion uses a simple but effective formula:
+| Script | Purpose |
+| --- | --- |
+| `npm run typecheck` | TypeScript check |
+| `npm run build:web` | Production web build into `dist/` (see below) |
+| `npm run serve:web` | Serve `dist/` locally on port 8080 |
+
+## 🌐 Web / PWA deployment
+
+The web app is deployed to **GitHub Pages** by `.github/workflows/deploy-web.yml` on every push to `master`.
+
+One-time setup: in the repository go to **Settings → Pages → Build and deployment → Source** and select **GitHub Actions**. The app is then available at `https://<user>.github.io/liczygrosz/`.
+
+How the web build works:
+
+- `expo export -p web` creates a single-page app; `scripts/postbuild-web.mjs` then fills in the base URL, generates the service worker precache list, adds `404.html` (SPA fallback for deep links) and `.nojekyll`.
+- `EXPO_BASE_URL` sets the path the app is served from (`/liczygrosz` on GitHub Pages). Use an empty value when hosting on a domain root, e.g. a custom domain.
+- Data is stored in SQLite (`expo-sqlite`, WebAssembly + OPFS). It needs `SharedArrayBuffer`, which requires cross-origin isolation (COOP/COEP headers). GitHub Pages cannot set headers, so the service worker (`public/sw.js`) adds them; on the very first visit the page reloads once. The dev server sets the headers in `metro.config.js`.
+- The service worker also caches the app, so it works offline after the first visit.
+
+> ⚠️ Web data lives in the browser's storage for this site. Clearing site data removes it, so export to CSV regularly. The app requests persistent storage to reduce the risk of eviction.
+
+## 🛠️ Tech stack
+
+Expo SDK 54 · React Native 0.81 · Expo Router · expo-sqlite · i18n-js · date-fns · react-native-chart-kit
+
+## 📂 Project structure
+
 ```
-Potential Savings = Total Income (Current Month) - Total Expenses (Current Month)
+app/                     Screens (Expo Router)
+├── (tabs)/              Dashboard, Add, Stats, Profile
+├── transaction/[id].tsx Edit transaction
+├── categories/          Category management
+└── recurring/           Recurring items
+components/              Feature and UI components
+context/                 Localization (language, currency) provider
+db/                      Schema, migrations and settings
+locales/                 en / pl translations
+utils/                   Recurring processing, money formatting, CSV export, dialogs
+public/                  PWA files: index.html template, manifest, service worker, icons
+scripts/                 Web post-build step
 ```
-- Calculates from the 1st of the current month to today
-- Updates in real-time as you add transactions
-- Displays positive savings or shows $0.00 if expenses exceed income
-
-### Currency Management
-- **Global Default**: Set in LocalizationContext based on device locale
-- **User Override**: Change default currency in Profile settings
-- **Transaction-Specific**: Each transaction can have its own currency
-- **Persistence**: Currency preferences are saved locally
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 📄 License
 
-This project is open source and available under the MIT License.
+MIT
 
 ## 👨‍💻 Author
 
-**Piotr Ptak**
-- GitHub: [@piotrptak](https://github.com/piotrptak)
-
-## 🙏 Acknowledgments
-
-- Built with ❤️ using React Native and Expo
-- Icons from Expo Vector Icons
-- Charts powered by react-native-chart-kit
-
----
-
-**LiczyGrosz** - Track every penny, save every złoty! 🐷💰
+**Piotr Ptak** – [@piotrptak](https://github.com/piotrptak)

@@ -6,9 +6,10 @@ import { useIsFocused } from '@react-navigation/native';
 import { endOfMonth, format, isThisYear, isToday, isYesterday, startOfMonth } from 'date-fns';
 import { useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
+import { confirmAction } from '@/utils/dialogs';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, SectionList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
+import { ActivityIndicator, SectionList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 
 interface Transaction {
     id: number;
@@ -36,7 +37,7 @@ export default function TransactionList({ selectedDate, filterType }: Transactio
     const db = useSQLiteContext();
     const router = useRouter();
     const isFocused = useIsFocused();
-    const { t, currency: defaultSymbol, currencies, dateLocale } = useLocalization();
+    const { t, dateLocale, formatMoney } = useLocalization();
     const colorScheme = useColorScheme();
     const colors = Colors[colorScheme ?? 'light'];
 
@@ -101,36 +102,14 @@ export default function TransactionList({ selectedDate, filterType }: Transactio
     };
 
     const handleDelete = (id: number) => {
-        Alert.alert(
-            "Delete Transaction",
-            "Are you sure?",
-            [
-                { text: "Cancel", style: "cancel" },
-                {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: async () => {
-                        await db.runAsync('DELETE FROM transactions WHERE id = ?', [id]);
-                        loadTransactions(); // Reload
-                    }
-                }
-            ]
-        );
+        confirmAction(t('delete_transaction_title'), t('delete_transaction_message'), t('delete'), t('cancel'), async () => {
+            await db.runAsync('DELETE FROM transactions WHERE id = ?', [id]);
+            loadTransactions();
+        });
     };
 
     const handleEdit = (item: Transaction) => {
-        router.push({
-            pathname: '/(tabs)/add',
-            params: {
-                id: item.id,
-                amount: item.amount,
-                type: item.type,
-                category: item.category,
-                note: item.note || '',
-                date: item.date.toString(),
-                currency: item.currency
-            }
-        });
+        router.push({ pathname: '/transaction/[id]', params: { id: item.id } });
     };
 
     const renderRightActions = (id: number) => {
@@ -161,7 +140,7 @@ export default function TransactionList({ selectedDate, filterType }: Transactio
             <Swipeable renderRightActions={() => renderRightActions(item.id)}>
                 <TouchableOpacity
                     activeOpacity={0.7}
-                    onLongPress={() => handleEdit(item)}
+                    onPress={() => handleEdit(item)}
                     style={[styles.card, { backgroundColor: colors.surface }]}
                 >
                     <View style={[styles.iconContainer, { backgroundColor: iconBg }]}>
@@ -176,7 +155,7 @@ export default function TransactionList({ selectedDate, filterType }: Transactio
                             styles.amount,
                             { color: isIncome ? colors.moneyIncome : colors.text }
                         ]}>
-                            {isIncome ? '+' : ''}{item.currency ? (currencies.find(c => c.code === item.currency)?.symbol || item.currency) : defaultSymbol}{item.amount.toFixed(2)}
+                            {isIncome ? '+' : '-'}{formatMoney(item.amount, item.currency)}
                         </Text>
                     </View>
                 </TouchableOpacity>
@@ -201,24 +180,21 @@ export default function TransactionList({ selectedDate, filterType }: Transactio
     }
 
     return (
-        <GestureHandlerRootView style={{ flex: 1 }}>
-            <SectionList
-                sections={sections}
-                keyExtractor={(item) => item.id.toString()}
-                renderItem={renderItem}
-                renderSectionHeader={renderSectionHeader}
-                contentContainerStyle={styles.list}
-                showsVerticalScrollIndicator={false}
-                stickySectionHeadersEnabled={false}
-            />
-        </GestureHandlerRootView>
+        <SectionList
+            sections={sections}
+            keyExtractor={(item) => item.id.toString()}
+            renderItem={renderItem}
+            renderSectionHeader={renderSectionHeader}
+            contentContainerStyle={styles.list}
+            showsVerticalScrollIndicator={false}
+            stickySectionHeadersEnabled={false}
+        />
     );
 }
 
 const styles = StyleSheet.create({
     list: {
         paddingBottom: 40,
-        paddingHorizontal: 20,
     },
     sectionHeader: {
         fontSize: 13,

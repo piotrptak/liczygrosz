@@ -6,9 +6,9 @@ import { useIsFocused } from '@react-navigation/native';
 import { endOfMonth, startOfMonth } from 'date-fns';
 import { useSQLiteContext } from 'expo-sqlite';
 import React, { useEffect, useState } from 'react';
-import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-const { width } = Dimensions.get('window');
+type Totals = { income: number; expense: number };
 
 interface BalanceCardProps {
     selectedDate: Date;
@@ -20,68 +20,63 @@ interface BalanceCardProps {
 export default function BalanceCard({ selectedDate, onPressIncome, onPressExpense, activeFilter = 'all' }: BalanceCardProps) {
     const db = useSQLiteContext();
     const isFocused = useIsFocused();
-    const { t, currency } = useLocalization();
+    const { t, currency, currencyCode, formatMoney } = useLocalization();
     const colorScheme = useColorScheme();
     const colors = Colors[colorScheme ?? 'light'];
 
-    const [balance, setBalance] = useState(0);
-    const [income, setIncome] = useState(0);
-    const [expense, setExpense] = useState(0);
+    // Totals per currency; amounts in different currencies are never added together.
+    const [totals, setTotals] = useState<Record<string, Totals>>({});
 
     useEffect(() => {
         if (isFocused) {
             calculateBalance();
         }
-    }, [isFocused, selectedDate]);
+    }, [isFocused, selectedDate, currencyCode]);
 
     const calculateBalance = async () => {
         try {
             const start = startOfMonth(selectedDate).getTime();
             const end = endOfMonth(selectedDate).getTime();
 
-            const result: any[] = await db.getAllAsync(`
-                SELECT type, SUM(amount) as total 
-                FROM transactions 
-                WHERE date >= ? AND date <= ? 
-                GROUP BY type
-            `, [start, end]);
+            const result = await db.getAllAsync<{ currency: string; type: string; total: number }>(`
+                SELECT COALESCE(currency, ?) as currency, type, SUM(amount) as total
+                FROM transactions
+                WHERE date >= ? AND date <= ?
+                GROUP BY 1, 2
+            `, [currencyCode, start, end]);
 
-            let inc = 0;
-            let exp = 0;
+            const next: Record<string, Totals> = {};
             result.forEach(row => {
-                if (row.type === 'income') inc = row.total;
-                if (row.type === 'expense') exp = row.total;
+                next[row.currency] ??= { income: 0, expense: 0 };
+                if (row.type === 'income') next[row.currency].income = row.total;
+                if (row.type === 'expense') next[row.currency].expense = row.total;
             });
-            setIncome(inc);
-            setExpense(exp);
-            setBalance(inc - exp);
+            setTotals(next);
         } catch (e) {
             console.error(e);
         }
     };
 
+    const { income, expense } = totals[currencyCode] ?? { income: 0, expense: 0 };
+    const otherCurrencies = Object.entries(totals).filter(([code]) => code !== currencyCode);
+
     return (
         <View style={styles.container}>
-            {/* Main Balance Display */}
-            <TouchableOpacity
-                activeOpacity={1}
-                onPress={() => {
-                    if (activeFilter !== 'all') {
-                        // Reset filter if clicking header, optional but nice UX
-                        if (onPressIncome && onPressExpense) {
-                            // A bit hacky, but we should probably expose a separate 'reset' prop or handle it in parent
-                            // For now, let's just make the children clickable.
-                        }
-                    }
-                }}
-                style={styles.header}
-            >
+            <View style={styles.header}>
                 <Text style={[styles.label, { color: colors.textSecondary }]}>{t('total_balance')}</Text>
                 <View style={styles.balanceContainer}>
-                    <Text style={[styles.currency, { color: colors.text }]}>{currency}</Text>
-                    <Text style={[styles.balance, { color: colors.text }]}>{balance.toFixed(2)}</Text>
+                    {currencyCode !== 'PLN' && <Text style={[styles.currency, { color: colors.text }]}>{currency}</Text>}
+                    <Text style={[styles.balance, { color: colors.text }]} adjustsFontSizeToFit numberOfLines={1}>
+                        {(income - expense).toFixed(2)}
+                    </Text>
+                    {currencyCode === 'PLN' && <Text style={[styles.currency, { color: colors.text, marginLeft: 6 }]}>{currency}</Text>}
                 </View>
-            </TouchableOpacity>
+                {otherCurrencies.length > 0 && (
+                    <Text style={[styles.other, { color: colors.textSecondary }]}>
+                        {t('other_currencies')}: {otherCurrencies.map(([code, v]) => formatMoney(v.income - v.expense, code)).join(' · ')}
+                    </Text>
+                )}
+            </View>
 
             {/* Income / Expense Split Cards */}
             <View style={styles.row}>
@@ -96,9 +91,9 @@ export default function BalanceCard({ selectedDate, onPressIncome, onPressExpens
                     <View style={[styles.icon, { backgroundColor: colors.success + '20' }]}>
                         <FontAwesome name="arrow-up" size={14} color={colors.success} />
                     </View>
-                    <View>
+                    <View style={{ flexShrink: 1 }}>
                         <Text style={[styles.subLabel, { color: colors.textSecondary }]}>{t('income')}</Text>
-                        <Text style={[styles.subValue, { color: colors.text }]}>{currency}{income.toFixed(2)}</Text>
+                        <Text style={[styles.subValue, { color: colors.text }]}>{formatMoney(income)}</Text>
                     </View>
                 </TouchableOpacity>
 
@@ -113,9 +108,9 @@ export default function BalanceCard({ selectedDate, onPressIncome, onPressExpens
                     <View style={[styles.icon, { backgroundColor: colors.error + '20' }]}>
                         <FontAwesome name="arrow-down" size={14} color={colors.error} />
                     </View>
-                    <View>
+                    <View style={{ flexShrink: 1 }}>
                         <Text style={[styles.subLabel, { color: colors.textSecondary }]}>{t('expense')}</Text>
-                        <Text style={[styles.subValue, { color: colors.text }]}>{currency}{expense.toFixed(2)}</Text>
+                        <Text style={[styles.subValue, { color: colors.text }]}>{formatMoney(expense)}</Text>
                     </View>
                 </TouchableOpacity>
             </View>
@@ -150,6 +145,11 @@ const styles = StyleSheet.create({
         marginRight: 4,
         fontFamily: 'SpaceMono',
     },
+    other: {
+        fontSize: 13,
+        marginTop: 8,
+        textAlign: 'center',
+    },
     balance: {
         fontSize: 48,
         fontWeight: 'bold',
@@ -165,9 +165,9 @@ const styles = StyleSheet.create({
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
+        padding: 14,
         borderRadius: 24,
-        gap: 12,
+        gap: 10,
         borderWidth: 2,
         borderColor: 'transparent',
         // Soft Shadow
@@ -190,7 +190,7 @@ const styles = StyleSheet.create({
         marginBottom: 2,
     },
     subValue: {
-        fontSize: 16,
+        fontSize: 15,
         fontWeight: '700',
         fontFamily: 'SpaceMono',
     },
