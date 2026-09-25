@@ -5,9 +5,9 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>%WEB_TITLE%</title>
-    <meta name="description" content="LiczyGrosz – prosty, prywatny tracker wydatków. Dane zostają na Twoim urządzeniu." />
-    <meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="LiczyGrosz – prosty, prywatny tracker wydatków. Dane synchronizowane między telefonem a komputerem." />
+    <meta name="theme-color" content="#F5F6F8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0B0D12" media="(prefers-color-scheme: dark)" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -23,11 +23,11 @@
       body {
         overflow: hidden;
         margin: 0;
-        background-color: #f2f2f7;
+        background-color: #f5f6f8;
       }
       @media (prefers-color-scheme: dark) {
         body {
-          background-color: #000;
+          background-color: #0b0d12;
         }
       }
       #root {
@@ -37,24 +37,11 @@
       }
     </style>
     <script>
-      // The service worker adds the COOP/COEP headers that expo-sqlite (SharedArrayBuffer) needs,
-      // since static hosts such as GitHub Pages cannot set them. It also caches the app for offline use.
+      // Service worker: caches the app shell so the PWA opens offline and installs on the home screen.
       (function () {
         var base = '__BASE_URL__/';
         if (base.charAt(0) === '_' || !('serviceWorker' in navigator)) return; // dev server
-        navigator.serviceWorker.register(base + 'sw.js', { scope: base }).then(function (reg) {
-          if (window.crossOriginIsolated) return;
-          // First visit: reload once the worker controls the page so the headers apply.
-          var reload = function () {
-            if (sessionStorage.getItem('coi-reloaded')) return;
-            sessionStorage.setItem('coi-reloaded', '1');
-            location.reload();
-          };
-          if (navigator.serviceWorker.controller) reload();
-          else navigator.serviceWorker.addEventListener('controllerchange', reload);
-        });
-        if (window.crossOriginIsolated) sessionStorage.removeItem('coi-reloaded');
-        if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+        navigator.serviceWorker.register(base + 'sw.js', { scope: base });
       })();
     </script>
   </head>

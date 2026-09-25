@@ -3,7 +3,7 @@
     "name": "LiczyGrosz",
     "slug": "liczygrosz",
     "version": "1.0.0",
-    "description": "Prosty, prywatny tracker wydatków. Dane zostają na Twoim urządzeniu.",
+    "description": "Prosty tracker wydatków synchronizowany między telefonem a komputerem.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "liczygrosz",
@@ -34,8 +34,8 @@
       "name": "LiczyGrosz",
       "shortName": "LiczyGrosz",
       "lang": "pl",
-      "themeColor": "#5856D6",
-      "backgroundColor": "#F2F2F7"
+      "themeColor": "#4F46E5",
+      "backgroundColor": "#F5F6F8"
     },
     "plugins": [
       "expo-router",

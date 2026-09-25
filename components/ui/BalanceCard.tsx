@@ -1,197 +1,87 @@
-import { useColorScheme } from '@/components/useColorScheme';
-import Colors from '@/constants/Colors';
+import { radius, space, useTheme } from '@/constants/theme';
 import { useLocalization } from '@/context/LocalizationContext';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useIsFocused } from '@react-navigation/native';
-import { endOfMonth, startOfMonth } from 'date-fns';
-import { useSQLiteContext } from 'expo-sqlite';
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import type { Transaction } from '@/lib/api';
+import { ArrowDownLeft, ArrowUpRight, type LucideIcon } from '@/components/ui/icons';
+import React, { useMemo } from 'react';
+import { StyleSheet, View } from 'react-native';
+import Skeleton from './Skeleton';
+import Text from './Text';
 
 type Totals = { income: number; expense: number };
 
-interface BalanceCardProps {
-    selectedDate: Date;
-    onPressIncome?: () => void;
-    onPressExpense?: () => void;
-    activeFilter?: 'all' | 'income' | 'expense';
-}
+type Props = { transactions: Transaction[]; loading?: boolean };
 
-export default function BalanceCard({ selectedDate, onPressIncome, onPressExpense, activeFilter = 'all' }: BalanceCardProps) {
-    const db = useSQLiteContext();
-    const isFocused = useIsFocused();
-    const { t, currency, currencyCode, formatMoney } = useLocalization();
-    const colorScheme = useColorScheme();
-    const colors = Colors[colorScheme ?? 'light'];
+/** Month summary in the default currency; other currencies are listed separately, never converted. */
+export default function BalanceCard({ transactions, loading }: Props) {
+    const { colors } = useTheme();
+    const { t, currencyCode, formatMoney } = useLocalization();
 
-    // Totals per currency; amounts in different currencies are never added together.
-    const [totals, setTotals] = useState<Record<string, Totals>>({});
-
-    useEffect(() => {
-        if (isFocused) {
-            calculateBalance();
+    const totals = useMemo(() => {
+        const result: Record<string, Totals> = {};
+        for (const tx of transactions) {
+            result[tx.currency] ??= { income: 0, expense: 0 };
+            result[tx.currency][tx.type] += tx.amount;
         }
-    }, [isFocused, selectedDate, currencyCode]);
-
-    const calculateBalance = async () => {
-        try {
-            const start = startOfMonth(selectedDate).getTime();
-            const end = endOfMonth(selectedDate).getTime();
-
-            const result = await db.getAllAsync<{ currency: string; type: string; total: number }>(`
-                SELECT COALESCE(currency, ?) as currency, type, SUM(amount) as total
-                FROM transactions
-                WHERE date >= ? AND date <= ?
-                GROUP BY 1, 2
-            `, [currencyCode, start, end]);
-
-            const next: Record<string, Totals> = {};
-            result.forEach(row => {
-                next[row.currency] ??= { income: 0, expense: 0 };
-                if (row.type === 'income') next[row.currency].income = row.total;
-                if (row.type === 'expense') next[row.currency].expense = row.total;
-            });
-            setTotals(next);
-        } catch (e) {
-            console.error(e);
-        }
-    };
+        return result;
+    }, [transactions]);
 
     const { income, expense } = totals[currencyCode] ?? { income: 0, expense: 0 };
+    const balance = income - expense;
     const otherCurrencies = Object.entries(totals).filter(([code]) => code !== currencyCode);
 
     return (
-        <View style={styles.container}>
-            <View style={styles.header}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>{t('total_balance')}</Text>
-                <View style={styles.balanceContainer}>
-                    {currencyCode !== 'PLN' && <Text style={[styles.currency, { color: colors.text }]}>{currency}</Text>}
-                    <Text style={[styles.balance, { color: colors.text }]} adjustsFontSizeToFit numberOfLines={1}>
-                        {(income - expense).toFixed(2)}
-                    </Text>
-                    {currencyCode === 'PLN' && <Text style={[styles.currency, { color: colors.text, marginLeft: 6 }]}>{currency}</Text>}
-                </View>
-                {otherCurrencies.length > 0 && (
-                    <Text style={[styles.other, { color: colors.textSecondary }]}>
-                        {t('other_currencies')}: {otherCurrencies.map(([code, v]) => formatMoney(v.income - v.expense, code)).join(' · ')}
-                    </Text>
-                )}
+        <View style={[styles.card, { backgroundColor: colors.primary }]}>
+            <Text variant="label" style={styles.muted}>{t('total_balance')}</Text>
+            {loading ? (
+                <Skeleton width={180} height={40} style={styles.skeleton} />
+            ) : (
+                <Text variant="display" tabular style={styles.white} numberOfLines={1} adjustsFontSizeToFit accessibilityLabel={`${t('total_balance')}: ${formatMoney(balance)}`}>
+                    {formatMoney(balance)}
+                </Text>
+            )}
+            {otherCurrencies.length > 0 && (
+                <Text variant="caption" style={styles.muted}>
+                    {t('other_currencies')}: {otherCurrencies.map(([code, v]) => formatMoney(v.income - v.expense, code)).join(' · ')}
+                </Text>
+            )}
+
+            <View style={styles.stats}>
+                <Stat icon={ArrowDownLeft} label={t('income')} value={formatMoney(income)} />
+                <View style={styles.separator} />
+                <Stat icon={ArrowUpRight} label={t('expense')} value={formatMoney(expense)} />
             </View>
+        </View>
+    );
+}
 
-            {/* Income / Expense Split Cards */}
-            <View style={styles.row}>
-                <TouchableOpacity
-                    onPress={onPressIncome}
-                    style={[
-                        styles.statsCard,
-                        { backgroundColor: colors.surface },
-                        activeFilter === 'income' && { borderColor: colors.success, borderWidth: 2 }
-                    ]}
-                >
-                    <View style={[styles.icon, { backgroundColor: colors.success + '20' }]}>
-                        <FontAwesome name="arrow-up" size={14} color={colors.success} />
-                    </View>
-                    <View style={{ flexShrink: 1 }}>
-                        <Text style={[styles.subLabel, { color: colors.textSecondary }]}>{t('income')}</Text>
-                        <Text style={[styles.subValue, { color: colors.text }]}>{formatMoney(income)}</Text>
-                    </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    onPress={onPressExpense}
-                    style={[
-                        styles.statsCard,
-                        { backgroundColor: colors.surface },
-                        activeFilter === 'expense' && { borderColor: colors.error, borderWidth: 2 }
-                    ]}
-                >
-                    <View style={[styles.icon, { backgroundColor: colors.error + '20' }]}>
-                        <FontAwesome name="arrow-down" size={14} color={colors.error} />
-                    </View>
-                    <View style={{ flexShrink: 1 }}>
-                        <Text style={[styles.subLabel, { color: colors.textSecondary }]}>{t('expense')}</Text>
-                        <Text style={[styles.subValue, { color: colors.text }]}>{formatMoney(expense)}</Text>
-                    </View>
-                </TouchableOpacity>
+function Stat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
+    return (
+        <View style={styles.stat}>
+            <View style={styles.statIcon}>
+                <Icon size={16} color="#FFFFFF" strokeWidth={2.4} />
+            </View>
+            <View style={{ flexShrink: 1 }}>
+                <Text variant="caption" style={styles.muted}>{label}</Text>
+                <Text variant="bodyStrong" tabular style={styles.white} numberOfLines={1}>{value}</Text>
             </View>
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        marginBottom: 24,
-    },
-    header: {
-        alignItems: 'center',
-        marginBottom: 32,
-        marginTop: 16,
-    },
-    label: {
-        fontSize: 14,
-        fontWeight: '500',
-        marginBottom: 8,
-        letterSpacing: 1,
-        textTransform: 'uppercase',
-    },
-    balanceContainer: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-    },
-    currency: {
-        fontSize: 24,
-        fontWeight: '500',
-        marginTop: 6,
-        marginRight: 4,
-        fontFamily: 'SpaceMono',
-    },
-    other: {
-        fontSize: 13,
-        marginTop: 8,
-        textAlign: 'center',
-    },
-    balance: {
-        fontSize: 48,
-        fontWeight: 'bold',
-        fontFamily: 'SpaceMono',
-        letterSpacing: -1,
-    },
-    row: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        gap: 16,
-    },
-    statsCard: {
-        flex: 1,
+    card: { borderRadius: radius.xl, padding: space.xl, gap: space.xs },
+    white: { color: '#FFFFFF' },
+    muted: { color: 'rgba(255,255,255,0.9)' },
+    skeleton: { opacity: 0.3, marginVertical: 2 },
+    stats: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 14,
-        borderRadius: 24,
-        gap: 10,
-        borderWidth: 2,
-        borderColor: 'transparent',
-        // Soft Shadow
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.04,
-        shadowRadius: 12,
-        elevation: 2,
+        marginTop: space.lg,
+        padding: space.md,
+        borderRadius: radius.lg,
+        backgroundColor: 'rgba(255,255,255,0.12)',
     },
-    icon: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    subLabel: {
-        fontSize: 12,
-        fontWeight: '500',
-        marginBottom: 2,
-    },
-    subValue: {
-        fontSize: 15,
-        fontWeight: '700',
-        fontFamily: 'SpaceMono',
-    },
+    stat: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.sm },
+    statIcon: { width: 32, height: 32, borderRadius: radius.sm + 2, backgroundColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center' },
+    separator: { width: 1, alignSelf: 'stretch', backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: space.md },
 });

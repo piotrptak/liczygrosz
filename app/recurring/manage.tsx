@@ -1,294 +1,256 @@
+import Button from '@/components/ui/Button';
+import Card from '@/components/ui/Card';
+import CategoryIcon from '@/components/ui/CategoryIcon';
 import DateField from '@/components/ui/DateField';
-import ScreenHeader from '@/components/ui/ScreenHeader';
-import { useColorScheme } from '@/components/useColorScheme';
-import Colors from '@/constants/Colors';
+import EmptyState from '@/components/ui/EmptyState';
+import IconButton from '@/components/ui/IconButton';
+import Screen from '@/components/ui/Screen';
+import SegmentedControl from '@/components/ui/SegmentedControl';
+import Sheet from '@/components/ui/Sheet';
+import Skeleton from '@/components/ui/Skeleton';
+import Text from '@/components/ui/Text';
+import TextField from '@/components/ui/TextField';
+import { layout, radius, space, useTheme } from '@/constants/theme';
 import { useLocalization } from '@/context/LocalizationContext';
-import { confirmAction, showMessage } from '@/utils/dialogs';
+import { createRecurring, deleteRecurring, fetchCategories, fetchRecurring, processRecurring, type TxType } from '@/lib/api';
+import { invalidateTransactions, keys, queryClient } from '@/lib/queryClient';
+import { confirmAction, showMessage, showSuccess } from '@/utils/dialogs';
+import { errorKey } from '@/utils/errors';
 import { parseAmount } from '@/utils/money';
-import { processRecurringTransactions } from '@/utils/recurringService';
-import Ionicons from '@expo/vector-icons/Ionicons';
-import { format, startOfDay } from 'date-fns';
-import { useSQLiteContext } from 'expo-sqlite';
-import React, { useEffect, useState } from 'react';
-import { FlatList, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useQuery } from '@tanstack/react-query';
+import { format, parseISO } from 'date-fns';
+import { ArrowDownLeft, ArrowUpRight, CalendarClock, Check, Coins, Plus, Repeat, StickyNote, Trash2 } from '@/components/ui/icons';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
-type RecurringRow = {
-    id: number;
-    amount: number;
-    type: 'income' | 'expense';
-    category: string;
-    frequency: 'weekly' | 'monthly';
-    next_due_date: number;
-    note: string | null;
-    currency: string | null;
-};
+type Frequency = 'weekly' | 'monthly';
 
 export default function ManageRecurring() {
-    const db = useSQLiteContext();
     const { t, currencies, currencyCode, dateLocale, formatMoney } = useLocalization();
-    const colors = Colors[useColorScheme() ?? 'light'];
+    const { colors } = useTheme();
 
-    const [recurringItems, setRecurringItems] = useState<RecurringRow[]>([]);
-    const [categories, setCategories] = useState<any[]>([]);
-    const [isModalVisible, setModalVisible] = useState(false);
+    const { data: items = [], isPending } = useQuery({ queryKey: keys.recurring, queryFn: fetchRecurring });
+    const { data: categories = [] } = useQuery({ queryKey: keys.categories, queryFn: fetchCategories });
+    const categoryByName = new Map(categories.map(c => [c.name, c]));
 
-    // Form State
+    const [open, setOpen] = useState(false);
     const [amount, setAmount] = useState('');
+    const [amountError, setAmountError] = useState<string | null>(null);
     const [note, setNote] = useState('');
-    const [type, setType] = useState<'income' | 'expense'>('expense');
-    const [frequency, setFrequency] = useState<'weekly' | 'monthly'>('monthly');
+    const [noteError, setNoteError] = useState<string | null>(null);
+    const [type, setType] = useState<TxType>('expense');
+    const [frequency, setFrequency] = useState<Frequency>('monthly');
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+    const [categoryError, setCategoryError] = useState(false);
     const [txCurrency, setTxCurrency] = useState(currencyCode);
     const [startDate, setStartDate] = useState(new Date());
-    const [noteError, setNoteError] = useState<string | null>(null);
+    const [saving, setSaving] = useState(false);
 
-    useEffect(() => {
-        loadData();
-    }, []);
+    const refresh = () => queryClient.invalidateQueries({ queryKey: keys.recurring });
 
-    const loadData = async () => {
-        setRecurringItems(await db.getAllAsync<RecurringRow>('SELECT * FROM recurring_transactions ORDER BY next_due_date'));
-        setCategories(await db.getAllAsync('SELECT * FROM categories ORDER BY name'));
-    };
-
-    const openModal = () => {
+    const openSheet = () => {
         setAmount('');
+        setAmountError(null);
         setNote('');
-        setSelectedCategory(null);
         setNoteError(null);
+        setSelectedCategory(null);
+        setCategoryError(false);
         setTxCurrency(currencyCode);
         setStartDate(new Date());
-        setModalVisible(true);
+        setOpen(true);
     };
 
     const handleAdd = async () => {
         const parsedAmount = parseAmount(amount);
-        if (isNaN(parsedAmount) || parsedAmount <= 0 || !selectedCategory) {
-            showMessage(t('error'), t('fill_required'));
-            return;
-        }
-        if (!note.trim()) {
-            setNoteError(t('note_required'));
-            return;
-        }
+        const amountBad = isNaN(parsedAmount) || parsedAmount <= 0;
+        setAmountError(amountBad ? t('invalid_amount') : null);
+        setCategoryError(!selectedCategory);
+        setNoteError(note.trim() ? null : t('note_required'));
+        if (amountBad || !selectedCategory || !note.trim()) return;
 
+        setSaving(true);
         try {
-            const first = startOfDay(startDate).getTime();
-            await db.runAsync(
-                'INSERT INTO recurring_transactions (amount, type, category, frequency, next_due_date, start_date, note, currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                [parsedAmount, type, selectedCategory, frequency, first, first, note.trim(), txCurrency]
-            );
+            await createRecurring({
+                amount: Math.round(parsedAmount * 100) / 100,
+                type,
+                category: selectedCategory,
+                frequency,
+                start_date: startDate,
+                note: note.trim(),
+                currency: txCurrency,
+            });
             // Books the first occurrence right away when it is due today or in the past.
-            await processRecurringTransactions(db);
-            setModalVisible(false);
-            loadData();
-        } catch (error) {
-            console.error(error);
-            showMessage(t('error'), t('save_failed'));
+            await processRecurring();
+            await invalidateTransactions();
+            await refresh();
+            setOpen(false);
+            showSuccess(t('recurring_added'));
+        } catch (e) {
+            showMessage(t('error'), t(errorKey(e)));
+        } finally {
+            setSaving(false);
         }
     };
 
-    const handleDelete = (id: number) => {
+    const handleDelete = (id: string) => {
         confirmAction(t('delete_recurring_title'), t('delete_recurring_message'), t('delete'), t('cancel'), async () => {
-            await db.runAsync('DELETE FROM recurring_transactions WHERE id = ?', [id]);
-            loadData();
+            try {
+                await deleteRecurring(id);
+                await refresh();
+            } catch (e) {
+                showMessage(t('error'), t(errorKey(e)));
+            }
         });
     };
 
     return (
-        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-            <ScreenHeader title={t('recurring')} />
-            <View style={styles.body}>
-                <TouchableOpacity style={[styles.addButton, { backgroundColor: colors.primary }]} onPress={openModal}>
-                    <Text style={styles.addButtonText}>+ {t('new_recurring')}</Text>
-                </TouchableOpacity>
+        <Screen
+            title={t('recurring')}
+            subtitle={t('recurring_subtitle')}
+            backTo="/(tabs)/profile"
+            width={layout.formWidth + 80}
+            actions={<Button label={t('new')} icon={Plus} size="sm" onPress={openSheet} />}
+        >
+            {isPending ? (
+                <Skeleton height={200} rounded={radius.lg} />
+            ) : items.length === 0 ? (
+                <Card>
+                    <EmptyState icon={Repeat} title={t('no_recurring')} description={t('recurring_empty_description')} actionLabel={t('new_recurring')} actionIcon={Plus} onAction={openSheet} />
+                </Card>
+            ) : (
+                <Card padded={false}>
+                    {items.map((item, i) => {
+                        const category = categoryByName.get(item.category);
+                        const isIncome = item.type === 'income';
+                        return (
+                            <View key={item.id} style={[styles.row, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
+                                <CategoryIcon icon={category?.icon} color={category?.color} />
+                                <View style={{ flex: 1, gap: 2 }}>
+                                    <Text variant="bodyStrong" numberOfLines={1}>{item.note || item.category}</Text>
+                                    <Text variant="caption" tone="muted" numberOfLines={1}>{item.category} · {t(item.frequency)}</Text>
+                                    <View style={styles.due}>
+                                        <CalendarClock size={12} color={colors.textMuted} />
+                                        <Text variant="caption" tone="muted" numberOfLines={1}>
+                                            {t('next_due', { date: format(parseISO(item.next_due_date), 'd MMM yyyy', { locale: dateLocale }) })}
+                                        </Text>
+                                    </View>
+                                </View>
+                                <View style={styles.side}>
+                                    <Text variant="bodyStrong" tabular tone={isIncome ? 'income' : 'default'}>
+                                        {isIncome ? '+' : '−'}{formatMoney(item.amount, item.currency)}
+                                    </Text>
+                                    <IconButton icon={Trash2} label={`${t('delete')} ${item.note}`} tone="danger" onPress={() => handleDelete(item.id)} size={32} />
+                                </View>
+                            </View>
+                        );
+                    })}
+                </Card>
+            )}
 
-                <FlatList
-                    data={recurringItems}
-                    keyExtractor={(item) => item.id.toString()}
-                    ListEmptyComponent={<Text style={[styles.empty, { color: colors.textSecondary }]}>{t('no_recurring')}</Text>}
-                    renderItem={({ item }) => (
-                        <View style={[styles.card, { backgroundColor: colors.surface }]}>
-                            <View style={styles.cardLeft}>
-                                <Text style={[styles.itemCategory, { color: colors.text }]}>{item.note || item.category}</Text>
-                                <Text style={[styles.itemNote, { color: colors.textSecondary }]}>
-                                    {item.category} • {t(item.frequency)}
-                                </Text>
-                                <Text style={[styles.itemNote, { color: colors.textSecondary }]}>
-                                    {t('next_due', { date: format(new Date(item.next_due_date), 'd MMM yyyy', { locale: dateLocale }) })}
-                                </Text>
-                            </View>
-                            <View style={styles.cardRight}>
-                                <Text style={[styles.itemAmount, { color: item.type === 'income' ? colors.success : colors.text }]}>
-                                    {item.type === 'income' ? '+' : '-'}{formatMoney(item.amount, item.currency)}
-                                </Text>
-                                <TouchableOpacity onPress={() => handleDelete(item.id)} accessibilityLabel={t('delete')}>
-                                    <Ionicons name="trash-outline" size={20} color={colors.error} style={{ marginTop: 8 }} />
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    )}
-                    contentContainerStyle={styles.list}
+            <Sheet
+                visible={open}
+                onClose={() => setOpen(false)}
+                title={t('new_recurring')}
+                footer={
+                    <>
+                        <Button label={t('cancel')} variant="secondary" onPress={() => setOpen(false)} style={{ flex: 1 }} />
+                        <Button label={t('save')} icon={Check} onPress={handleAdd} loading={saving} style={{ flex: 1 }} />
+                    </>
+                }
+            >
+                <SegmentedControl<TxType>
+                    value={type}
+                    onChange={(v) => { setType(v); setSelectedCategory(null); }}
+                    options={[
+                        { value: 'expense', label: t('expense'), icon: ArrowUpRight, tone: 'expense' },
+                        { value: 'income', label: t('income'), icon: ArrowDownLeft, tone: 'income' },
+                    ]}
                 />
-            </View>
 
-            <Modal visible={isModalVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModalVisible(false)}>
-                <ScrollView
-                    style={{ backgroundColor: colors.background }}
-                    contentContainerStyle={styles.modalContainer}
-                    keyboardShouldPersistTaps="handled"
-                >
-                    <Text style={[styles.modalTitle, { color: colors.text }]}>{t('new_recurring')}</Text>
-
-                    <View style={styles.inputGroup}>
-                        <Text style={[styles.label, { color: colors.textSecondary }]}>{t('amount')}</Text>
-                        <TextInput
-                            style={[styles.input, { color: colors.text, borderColor: colors.border }]}
-                            placeholder="0.00"
-                            placeholderTextColor={colors.textSecondary}
-                            keyboardType="decimal-pad"
-                            inputMode="decimal"
-                            value={amount}
-                            onChangeText={(text) => setAmount(text.replace(/[^0-9.,]/g, ''))}
-                        />
-                        <View style={[styles.row, { marginTop: 8 }]}>
-                            {currencies.map(c => (
-                                <TouchableOpacity
+                <View style={{ gap: space.sm }}>
+                    <TextField
+                        label={t('amount')}
+                        icon={Coins}
+                        placeholder="0,00"
+                        keyboardType="decimal-pad"
+                        inputMode="decimal"
+                        value={amount}
+                        error={amountError}
+                        onChangeText={(text) => { setAmount(text.replace(/[^0-9.,]/g, '')); setAmountError(null); }}
+                    />
+                    <View style={styles.chips} accessibilityRole="radiogroup">
+                        {currencies.map(c => {
+                            const active = txCurrency === c.code;
+                            return (
+                                <Pressable
                                     key={c.code}
-                                    style={[styles.currencyPill, { backgroundColor: txCurrency === c.code ? colors.tint : colors.secondary }]}
                                     onPress={() => setTxCurrency(c.code)}
+                                    accessibilityRole="radio"
+                                    accessibilityState={{ checked: active }}
+                                    style={[styles.chip, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primarySoft : 'transparent' }]}
                                 >
-                                    <Text style={{ color: txCurrency === c.code ? '#FFF' : colors.text, fontWeight: 'bold' }}>{c.flag} {c.code}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
+                                    <Text variant="label" tone={active ? 'primary' : 'secondary'}>{c.flag} {c.code}</Text>
+                                </Pressable>
+                            );
+                        })}
                     </View>
+                </View>
 
-                    <View style={styles.inputGroup}>
-                        <Text style={[styles.label, { color: colors.textSecondary }]}>{t('type')}</Text>
-                        <View style={styles.row}>
-                            {(['expense', 'income'] as const).map(option => {
-                                const active = type === option;
-                                const activeColor = option === 'expense' ? colors.error : colors.success;
-                                return (
-                                    <TouchableOpacity
-                                        key={option}
-                                        onPress={() => {
-                                            setType(option);
-                                            setSelectedCategory(null);
-                                        }}
-                                        style={[styles.segment, active ? { backgroundColor: activeColor, borderColor: activeColor } : { borderColor: colors.border }]}
-                                    >
-                                        <Ionicons name={option === 'expense' ? 'arrow-down' : 'arrow-up'} size={16} color={active ? '#FFF' : colors.textSecondary} />
-                                        <Text style={[styles.segmentText, { color: active ? '#FFF' : colors.textSecondary }]}>{t(option)}</Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
-                    </View>
+                <View style={{ gap: 6 }}>
+                    <Text variant="label" tone="secondary">{t('frequency')}</Text>
+                    <SegmentedControl<Frequency>
+                        value={frequency}
+                        onChange={setFrequency}
+                        options={[
+                            { value: 'monthly', label: t('monthly') },
+                            { value: 'weekly', label: t('weekly') },
+                        ]}
+                    />
+                </View>
 
-                    <View style={styles.inputGroup}>
-                        <Text style={[styles.label, { color: colors.textSecondary }]}>{t('frequency')}</Text>
-                        <View style={styles.row}>
-                            {(['monthly', 'weekly'] as const).map(option => {
-                                const active = frequency === option;
-                                return (
-                                    <TouchableOpacity
-                                        key={option}
-                                        onPress={() => setFrequency(option)}
-                                        style={[styles.segment, active ? { backgroundColor: colors.tint, borderColor: colors.tint } : { borderColor: colors.border }]}
-                                    >
-                                        <Text style={[styles.segmentText, { color: active ? '#FFF' : colors.textSecondary }]}>{t(option)}</Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
-                    </View>
+                <DateField label={t('first_date')} value={startDate} onChange={setStartDate} />
 
-                    <View style={[styles.inputGroup, styles.dateRow]}>
-                        <Text style={[styles.label, { color: colors.textSecondary, marginBottom: 0 }]}>{t('first_date')}</Text>
-                        <DateField value={startDate} onChange={setStartDate} />
+                <View style={{ gap: 6 }}>
+                    <Text variant="label" tone={categoryError ? 'expense' : 'secondary'}>{t('category')}</Text>
+                    <View style={styles.chips} accessibilityRole="radiogroup">
+                        {categories.filter(c => c.type === type).map(cat => {
+                            const active = selectedCategory === cat.name;
+                            return (
+                                <Pressable
+                                    key={cat.id}
+                                    onPress={() => { setSelectedCategory(cat.name); setCategoryError(false); }}
+                                    accessibilityRole="radio"
+                                    accessibilityState={{ checked: active }}
+                                    style={[styles.categoryChip, { borderColor: active ? colors.primary : categoryError ? colors.expense : colors.border, backgroundColor: active ? colors.primarySoft : colors.surface }]}
+                                >
+                                    <CategoryIcon icon={cat.icon} color={cat.color} size={24} />
+                                    <Text variant="label" tone={active ? 'primary' : 'default'}>{cat.name}</Text>
+                                </Pressable>
+                            );
+                        })}
                     </View>
+                    {categoryError && <Text variant="caption" tone="expense">{t('select_category_error')}</Text>}
+                </View>
 
-                    <View style={styles.inputGroup}>
-                        <Text style={[styles.label, { color: colors.textSecondary }]}>{t('category')}</Text>
-                        <View style={styles.pillWrap}>
-                            {categories.filter(c => c.type === type).map(cat => {
-                                const active = selectedCategory === cat.name;
-                                return (
-                                    <TouchableOpacity
-                                        key={cat.id}
-                                        onPress={() => setSelectedCategory(cat.name)}
-                                        style={[styles.catPill, { borderColor: colors.border }, active && { backgroundColor: colors.tint, borderColor: colors.tint }]}
-                                    >
-                                        <Text style={{ color: active ? '#FFF' : colors.text }}>{cat.name}</Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
-                    </View>
-
-                    <View style={styles.inputGroup}>
-                        <Text style={[styles.label, { color: colors.textSecondary }]}>{t('note')}</Text>
-                        <TextInput
-                            style={[
-                                styles.input,
-                                { color: colors.text, borderColor: noteError ? colors.error : colors.border },
-                                noteError ? { backgroundColor: colors.error + '10' } : null,
-                            ]}
-                            placeholder={t('recurring_note_placeholder')}
-                            placeholderTextColor={colors.textSecondary}
-                            value={note}
-                            maxLength={200}
-                            onChangeText={(text) => {
-                                setNote(text);
-                                if (text.trim()) setNoteError(null);
-                            }}
-                        />
-                        {noteError && <Text style={{ color: colors.error, marginTop: 4, fontSize: 12 }}>{noteError}</Text>}
-                    </View>
-
-                    <View style={styles.modalButtons}>
-                        <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.modalButton}>
-                            <Text style={{ color: colors.text }}>{t('cancel')}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={handleAdd} style={[styles.modalButton, { backgroundColor: colors.primary }]}>
-                            <Text style={{ color: '#FFF', fontWeight: 'bold' }}>{t('save')}</Text>
-                        </TouchableOpacity>
-                    </View>
-                </ScrollView>
-            </Modal>
-        </SafeAreaView>
+                <TextField
+                    label={t('note')}
+                    icon={StickyNote}
+                    placeholder={t('recurring_note_placeholder')}
+                    value={note}
+                    error={noteError}
+                    maxLength={200}
+                    onChangeText={(text) => { setNote(text); if (text.trim()) setNoteError(null); }}
+                />
+            </Sheet>
+        </Screen>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1 },
-    body: { flex: 1, paddingHorizontal: 20, width: '100%', maxWidth: 640, alignSelf: 'center' },
-    addButton: { padding: 16, borderRadius: 16, alignItems: 'center', marginBottom: 20 },
-    addButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-    list: { paddingBottom: 40 },
-    empty: { textAlign: 'center', marginTop: 24 },
-    card: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, borderRadius: 16, marginBottom: 12 },
-    cardLeft: { flex: 1 },
-    cardRight: { alignItems: 'flex-end' },
-    itemCategory: { fontSize: 16, fontWeight: '600' },
-    itemNote: { fontSize: 12, marginTop: 4 },
-    itemAmount: { fontSize: 16, fontWeight: 'bold', fontFamily: 'SpaceMono' },
-
-    modalContainer: { flexGrow: 1, padding: 24, paddingTop: 40, width: '100%', maxWidth: 640, alignSelf: 'center' },
-    modalTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 24 },
-    inputGroup: { marginBottom: 20 },
-    label: { fontSize: 14, fontWeight: '600', marginBottom: 8 },
-    input: { padding: 16, borderRadius: 12, borderWidth: 1, fontSize: 18 },
-    row: { flexDirection: 'row', gap: 8 },
-    dateRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    currencyPill: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
-    segment: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flex: 1, paddingVertical: 10, borderRadius: 12, borderWidth: 1 },
-    segmentText: { fontWeight: '600', marginLeft: 4, fontSize: 14 },
-    pillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    catPill: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: 1 },
-    modalButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 24, marginBottom: 40 },
-    modalButton: { padding: 16, borderRadius: 16, width: '45%', alignItems: 'center' },
+    row: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingLeft: space.lg, paddingRight: space.md, paddingVertical: space.md },
+    due: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    side: { alignItems: 'flex-end', gap: 2 },
+    chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+    chip: { paddingHorizontal: space.md, paddingVertical: 6, borderRadius: radius.full, borderWidth: 1 },
+    categoryChip: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingLeft: 6, paddingRight: space.md, paddingVertical: 6, borderRadius: radius.full, borderWidth: 1 },
 });

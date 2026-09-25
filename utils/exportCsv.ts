@@ -1,5 +1,5 @@
+import { fetchAllTransactions } from '@/lib/api';
 import { format } from 'date-fns';
-import * as SQLite from 'expo-sqlite';
 import { Platform, Share } from 'react-native';
 
 const escape = (value: unknown) => {
@@ -7,8 +7,8 @@ const escape = (value: unknown) => {
     return /[",;\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 };
 
-export const buildTransactionsCsv = async (db: SQLite.SQLiteDatabase, fallbackCurrency: string) => {
-    const rows = await db.getAllAsync<any>('SELECT date, type, category, amount, currency, note FROM transactions ORDER BY date');
+export const buildTransactionsCsv = async () => {
+    const rows = await fetchAllTransactions();
     if (rows.length === 0) return null;
     const lines = [
         'date,type,category,amount,currency,note',
@@ -17,7 +17,7 @@ export const buildTransactionsCsv = async (db: SQLite.SQLiteDatabase, fallbackCu
             r.type,
             r.category,
             r.amount.toFixed(2),
-            r.currency || fallbackCurrency,
+            r.currency,
             r.note,
         ].map(escape).join(',')),
     ];
@@ -25,8 +25,8 @@ export const buildTransactionsCsv = async (db: SQLite.SQLiteDatabase, fallbackCu
 };
 
 // Returns false when there is nothing to export.
-export const exportTransactions = async (db: SQLite.SQLiteDatabase, fallbackCurrency: string) => {
-    const csv = await buildTransactionsCsv(db, fallbackCurrency);
+export const exportTransactions = async () => {
+    const csv = await buildTransactionsCsv();
     if (!csv) return false;
     const fileName = `liczygrosz-${format(new Date(), 'yyyy-MM-dd')}.csv`;
 

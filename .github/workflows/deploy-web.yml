@@ -30,11 +30,22 @@ jobs:
 
       - run: npm run typecheck
 
+      - name: Check Supabase configuration
+        if: github.event_name != 'pull_request'
+        run: |
+          if [ -z "${{ vars.SUPABASE_URL }}" ] || [ -z "${{ vars.SUPABASE_ANON_KEY }}" ]; then
+            echo "::error::Set repository variables SUPABASE_URL and SUPABASE_ANON_KEY (see README → Supabase setup)."
+            exit 1
+          fi
+
       - name: Build web
         run: npm run build:web
         env:
           # Project pages are served from /<repo-name>. Set to an empty string when using a custom domain.
           EXPO_BASE_URL: /${{ github.event.repository.name }}
+          # Repository variables (Settings → Secrets and variables → Actions → Variables).
+          EXPO_PUBLIC_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
           CI: 1
 
       - uses: actions/upload-pages-artifact@v3
