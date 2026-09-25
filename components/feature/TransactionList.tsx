@@ -1,31 +1,24 @@
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { useLocalization } from '@/context/LocalizationContext';
+import { deleteTransaction, fetchCategories, type Transaction } from '@/lib/api';
+import { invalidateTransactions, keys } from '@/lib/queryClient';
+import { useMonthTransactions } from '@/lib/useMonthTransactions';
+import { confirmAction, showMessage } from '@/utils/dialogs';
+import { errorKey } from '@/utils/errors';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useIsFocused } from '@react-navigation/native';
-import { endOfMonth, format, isThisYear, isToday, isYesterday, startOfMonth } from 'date-fns';
+import { useQuery } from '@tanstack/react-query';
+import { format, isThisYear, isToday, isYesterday } from 'date-fns';
 import { useRouter } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
-import { confirmAction } from '@/utils/dialogs';
-import React, { useEffect, useState } from 'react';
+import React, { useMemo } from 'react';
 import { ActivityIndicator, SectionList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 
-interface Transaction {
-    id: number;
-    amount: number;
-    type: 'income' | 'expense';
-    category: string;
-    date: number;
-    note?: string;
-    category_icon?: string;
-    category_color?: string;
-    currency?: string;
-}
+type Row = Transaction & { category_icon?: string | null; category_color?: string | null };
 
 interface SectionData {
     title: string;
-    data: Transaction[];
+    data: Row[];
 }
 
 interface TransactionListProps {
@@ -34,85 +27,48 @@ interface TransactionListProps {
 }
 
 export default function TransactionList({ selectedDate, filterType }: TransactionListProps) {
-    const db = useSQLiteContext();
     const router = useRouter();
-    const isFocused = useIsFocused();
     const { t, dateLocale, formatMoney } = useLocalization();
     const colorScheme = useColorScheme();
     const colors = Colors[colorScheme ?? 'light'];
 
-    const [sections, setSections] = useState<SectionData[]>([]);
-    const [loading, setLoading] = useState(true);
+    const { data: transactions = [], isPending, isError, refetch } = useMonthTransactions(selectedDate);
+    const { data: categories = [] } = useQuery({ queryKey: keys.categories, queryFn: fetchCategories });
 
-    useEffect(() => {
-        if (isFocused) {
-            loadTransactions();
+    const sections = useMemo<SectionData[]>(() => {
+        const byName = new Map(categories.map(c => [c.name, c]));
+        const grouped = new Map<string, Row[]>();
+        for (const tx of transactions) {
+            if (filterType !== 'all' && tx.type !== filterType) continue;
+            const date = new Date(tx.date);
+            let key = format(date, 'd MMM yyyy', { locale: dateLocale });
+            if (isToday(date)) key = t('today');
+            else if (isYesterday(date)) key = t('yesterday');
+            else if (isThisYear(date)) key = format(date, 'd MMM', { locale: dateLocale });
+
+            const category = byName.get(tx.category);
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key)!.push({ ...tx, category_icon: category?.icon, category_color: category?.color });
         }
-    }, [isFocused, selectedDate, filterType]);
+        return [...grouped].map(([title, data]) => ({ title, data }));
+    }, [transactions, categories, filterType, dateLocale, t]);
 
-    const loadTransactions = async () => {
-        try {
-            setLoading(true);
-            const start = startOfMonth(selectedDate).getTime();
-            const end = endOfMonth(selectedDate).getTime();
-
-            // We join with categories to get the icon and color
-            // Using LEFT JOIN in case a category was deleted but transaction remains (though we should handle that)
-            let query = `
-                SELECT t.*, c.icon as category_icon, c.color as category_color 
-                FROM transactions t 
-                LEFT JOIN categories c ON t.category = c.name 
-                WHERE t.date >= ? AND t.date <= ?
-            `;
-            const params: any[] = [start, end];
-
-            if (filterType !== 'all') {
-                query += ' AND t.type = ?';
-                params.push(filterType);
-            }
-
-            query += ' ORDER BY t.date DESC';
-
-            const result = await db.getAllAsync<Transaction>(query, params);
-
-            // Group by date
-            const grouped: { [key: string]: Transaction[] } = {};
-            result.forEach(tx => {
-                const date = new Date(tx.date);
-                let key = format(date, 'MMM dd, yyyy', { locale: dateLocale });
-                if (isToday(date)) key = t('today') || 'Today';
-                else if (isYesterday(date)) key = t('yesterday') || 'Yesterday';
-                else if (isThisYear(date)) key = format(date, 'MMM dd', { locale: dateLocale });
-
-                if (!grouped[key]) grouped[key] = [];
-                grouped[key].push(tx);
-            });
-
-            const sectionsArray = Object.keys(grouped).map(key => ({
-                title: key,
-                data: grouped[key]
-            }));
-
-            setSections(sectionsArray);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleDelete = (id: number) => {
+    const handleDelete = (id: string) => {
         confirmAction(t('delete_transaction_title'), t('delete_transaction_message'), t('delete'), t('cancel'), async () => {
-            await db.runAsync('DELETE FROM transactions WHERE id = ?', [id]);
-            loadTransactions();
+            try {
+                await deleteTransaction(id);
+                await invalidateTransactions();
+            } catch (error) {
+                showMessage(t('error'), t(errorKey(error)));
+            }
         });
     };
 
-    const handleEdit = (item: Transaction) => {
+    const handleEdit = (item: Row) => {
         router.push({ pathname: '/transaction/[id]', params: { id: item.id } });
     };
 
-    const renderRightActions = (id: number) => {
+    const renderRightActions = (id: string) => {
         return (
             <TouchableOpacity
                 style={styles.deleteAction}
@@ -124,13 +80,13 @@ export default function TransactionList({ selectedDate, filterType }: Transactio
     };
 
     // Helper to render icon safely
-    const renderCategoryIcon = (iconName: string | undefined, color: string | undefined) => {
+    const renderCategoryIcon = (iconName: string | null | undefined, color: string | undefined) => {
         // Use generic icon if missing
         const name = (iconName as any) || 'pricetag-outline';
         return <Ionicons name={name} size={20} color={color || '#FFF'} />;
     };
 
-    const renderItem = ({ item }: { item: Transaction }) => {
+    const renderItem = ({ item }: { item: Row }) => {
         const isIncome = item.type === 'income';
         // Use category color or fallback to income/expense colors
         const iconColor = item.category_color ? '#FFF' : (isIncome ? colors.success : colors.textSecondary);
@@ -167,8 +123,16 @@ export default function TransactionList({ selectedDate, filterType }: Transactio
         <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{title}</Text>
     );
 
-    if (loading) {
+    if (isPending) {
         return <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 20 }} />;
+    }
+
+    if (isError && transactions.length === 0) {
+        return (
+            <TouchableOpacity style={styles.emptyContainer} onPress={() => refetch()}>
+                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{t('error_offline')}</Text>
+            </TouchableOpacity>
+        );
     }
 
     if (sections.length === 0) {
@@ -182,7 +146,7 @@ export default function TransactionList({ selectedDate, filterType }: Transactio
     return (
         <SectionList
             sections={sections}
-            keyExtractor={(item) => item.id.toString()}
+            keyExtractor={(item) => item.id}
             renderItem={renderItem}
             renderSectionHeader={renderSectionHeader}
             contentContainerStyle={styles.list}

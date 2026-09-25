@@ -1,7 +1,7 @@
 {
   "name": "LiczyGrosz",
   "short_name": "LiczyGrosz",
-  "description": "Prosty, prywatny tracker wydatków. Dane zostają na Twoim urządzeniu.",
+  "description": "Prosty, prywatny tracker wydatków. Dane synchronizowane między telefonem a komputerem.",
   "lang": "pl",
   "id": "__BASE_URL__/",
   "start_url": "__BASE_URL__/",

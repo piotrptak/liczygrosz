@@ -1,11 +1,9 @@
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { useLocalization } from '@/context/LocalizationContext';
+import { useMonthTransactions } from '@/lib/useMonthTransactions';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useIsFocused } from '@react-navigation/native';
-import { endOfMonth, startOfMonth } from 'date-fns';
-import { useSQLiteContext } from 'expo-sqlite';
-import React, { useEffect, useState } from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 type Totals = { income: number; expense: number };
@@ -18,44 +16,21 @@ interface BalanceCardProps {
 }
 
 export default function BalanceCard({ selectedDate, onPressIncome, onPressExpense, activeFilter = 'all' }: BalanceCardProps) {
-    const db = useSQLiteContext();
-    const isFocused = useIsFocused();
     const { t, currency, currencyCode, formatMoney } = useLocalization();
     const colorScheme = useColorScheme();
     const colors = Colors[colorScheme ?? 'light'];
 
+    const { data: transactions = [] } = useMonthTransactions(selectedDate);
+
     // Totals per currency; amounts in different currencies are never added together.
-    const [totals, setTotals] = useState<Record<string, Totals>>({});
-
-    useEffect(() => {
-        if (isFocused) {
-            calculateBalance();
+    const totals = useMemo(() => {
+        const result: Record<string, Totals> = {};
+        for (const tx of transactions) {
+            result[tx.currency] ??= { income: 0, expense: 0 };
+            result[tx.currency][tx.type] += tx.amount;
         }
-    }, [isFocused, selectedDate, currencyCode]);
-
-    const calculateBalance = async () => {
-        try {
-            const start = startOfMonth(selectedDate).getTime();
-            const end = endOfMonth(selectedDate).getTime();
-
-            const result = await db.getAllAsync<{ currency: string; type: string; total: number }>(`
-                SELECT COALESCE(currency, ?) as currency, type, SUM(amount) as total
-                FROM transactions
-                WHERE date >= ? AND date <= ?
-                GROUP BY 1, 2
-            `, [currencyCode, start, end]);
-
-            const next: Record<string, Totals> = {};
-            result.forEach(row => {
-                next[row.currency] ??= { income: 0, expense: 0 };
-                if (row.type === 'income') next[row.currency].income = row.total;
-                if (row.type === 'expense') next[row.currency].expense = row.total;
-            });
-            setTotals(next);
-        } catch (e) {
-            console.error(e);
-        }
-    };
+        return result;
+    }, [transactions]);
 
     const { income, expense } = totals[currencyCode] ?? { income: 0, expense: 0 };
     const otherCurrencies = Object.entries(totals).filter(([code]) => code !== currencyCode);

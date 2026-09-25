@@ -15,16 +15,6 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Cross-origin isolation is required for SharedArrayBuffer, which expo-sqlite uses on the web.
-const isolate = (response) => {
-  if (!response || response.status === 0 || response.type === 'opaque') return response;
-  const headers = new Headers(response.headers);
-  headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
-  headers.set('Cross-Origin-Opener-Policy', 'same-origin');
-  headers.set('Cross-Origin-Resource-Policy', 'same-origin');
-  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
-};
-
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
@@ -37,11 +27,11 @@ self.addEventListener('fetch', (event) => {
           if (response.ok) {
             const copy = response.clone();
             caches.open(CACHE).then((cache) => cache.put(BASE, copy));
-            return isolate(response);
+            return response;
           }
-          return caches.match(BASE).then((cached) => isolate(cached || response));
+          return caches.match(BASE).then((cached) => cached || response);
         })
-        .catch(() => caches.match(BASE).then(isolate))
+        .catch(() => caches.match(BASE))
     );
     return;
   }
@@ -49,13 +39,13 @@ self.addEventListener('fetch', (event) => {
   // Build output is content-hashed, so cache first is safe.
   event.respondWith(
     caches.match(request).then((cached) => {
-      if (cached) return isolate(cached);
+      if (cached) return cached;
       return fetch(request).then((response) => {
         if (response.ok) {
           const copy = response.clone();
           caches.open(CACHE).then((cache) => cache.put(request, copy));
         }
-        return isolate(response);
+        return response;
       });
     })
   );

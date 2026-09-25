@@ -1,18 +1,19 @@
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
+import { useAuth } from '@/context/AuthContext';
 import { useLocalization } from '@/context/LocalizationContext';
-import { showMessage } from '@/utils/dialogs';
+import { confirmAction, showMessage } from '@/utils/dialogs';
+import { errorKey } from '@/utils/errors';
 import { exportTransactions } from '@/utils/exportCsv';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
 import React, { useState } from 'react';
 import { FlatList, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function ProfileScreen() {
-    const db = useSQLiteContext();
+    const { user, signOut, deleteAccount } = useAuth();
     const { t, locale, setLocale, languages, countryFlag, currencyCode, setCurrencyCode, currencies } = useLocalization();
     const router = useRouter();
     const colorScheme = useColorScheme();
@@ -23,12 +24,22 @@ export default function ProfileScreen() {
 
     const handleExport = async () => {
         try {
-            const exported = await exportTransactions(db, currencyCode);
+            const exported = await exportTransactions();
             if (!exported) showMessage(t('export_csv'), t('export_empty'));
         } catch (e) {
             console.error(e);
-            showMessage(t('error'), String(e));
+            showMessage(t('error'), t(errorKey(e)));
         }
+    };
+
+    const handleDeleteAccount = () => {
+        confirmAction(t('delete_account_title'), t('delete_account_message'), t('delete_account'), t('cancel'), async () => {
+            try {
+                await deleteAccount();
+            } catch (e) {
+                showMessage(t('error'), t(errorKey(e)));
+            }
+        });
     };
 
     const renderSettingItem = (
@@ -59,7 +70,7 @@ export default function ProfileScreen() {
                     <Image source={require('../../assets/images/liczygrosz-icon.png')} style={styles.avatar} />
                     <View style={{ flexShrink: 1 }}>
                         <Text style={[styles.name, { color: colors.text }]}>LiczyGrosz</Text>
-                        <Text style={[styles.email, { color: colors.textSecondary }]}>{t('login_subtitle')}</Text>
+                        <Text style={[styles.email, { color: colors.textSecondary }]} numberOfLines={1}>{user?.email}</Text>
                     </View>
                 </View>
 
@@ -99,7 +110,17 @@ export default function ProfileScreen() {
                     </View>
                 </View>
 
-                <Text style={[styles.info, { color: colors.textSecondary }]}>{t('local_data_info')}</Text>
+                {/* Account */}
+                <View style={styles.section}>
+                    <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{t('account')}</Text>
+                    <View style={[styles.card, { backgroundColor: colors.surface }]}>
+                        {renderSettingItem('log-out-outline', t('sign_out'), signOut, undefined, colors.textSecondary)}
+                        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+                        {renderSettingItem('trash-outline', t('delete_account'), handleDeleteAccount, undefined, colors.error)}
+                    </View>
+                </View>
+
+                <Text style={[styles.info, { color: colors.textSecondary }]}>{t('sync_info')}</Text>
                 <Text style={[styles.version, { color: colors.textSecondary }]}>
                     {t('version', { version: Constants.expoConfig?.version ?? '1.0.0' })}
                 </Text>

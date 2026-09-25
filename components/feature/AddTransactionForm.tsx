@@ -2,18 +2,18 @@ import DateField from '@/components/ui/DateField';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { useLocalization } from '@/context/LocalizationContext';
+import { createTransaction, deleteTransaction, fetchCategories, fetchTransaction, updateTransaction } from '@/lib/api';
+import { invalidateTransactions, keys } from '@/lib/queryClient';
 import { confirmAction, showMessage } from '@/utils/dialogs';
+import { errorKey } from '@/utils/errors';
 import { parseAmount } from '@/utils/money';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-type Category = { id: number; name: string; type: string; icon: string | null; color: string | null };
-
-export default function AddTransactionForm({ transactionId }: { transactionId?: number }) {
-    const db = useSQLiteContext();
+export default function AddTransactionForm({ transactionId }: { transactionId?: string }) {
     const router = useRouter();
     const { t, currencies, currencyCode, getCurrencyFlag } = useLocalization();
     const colorScheme = useColorScheme();
@@ -25,38 +25,36 @@ export default function AddTransactionForm({ transactionId }: { transactionId?: 
     const [amount, setAmount] = useState('');
     const [note, setNote] = useState('');
     const [type, setType] = useState<'income' | 'expense'>('expense');
-    const [categories, setCategories] = useState<Category[]>([]);
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
     const [noteError, setNoteError] = useState<string | null>(null);
     const [txCurrency, setTxCurrency] = useState(currencyCode);
     const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
     const [date, setDate] = useState(new Date());
+    const [saving, setSaving] = useState(false);
 
-    const loadCategories = useCallback(async () => {
-        const result = await db.getAllAsync<Category>('SELECT * FROM categories WHERE type = ? ORDER BY name', [type]);
-        setCategories(result);
-    }, [db, type]);
+    const { data: allCategories = [] } = useQuery({ queryKey: keys.categories, queryFn: fetchCategories });
+    const categories = allCategories.filter(c => c.type === type);
 
-    // Reload on focus as categories may have been edited in the meantime.
-    useFocusEffect(useCallback(() => { loadCategories(); }, [loadCategories]));
+    const { data: existing, isFetched } = useQuery({
+        queryKey: keys.transaction(transactionId ?? ''),
+        queryFn: () => fetchTransaction(transactionId!),
+        enabled: isEditing,
+    });
 
     useEffect(() => {
-        if (!isEditing) return;
-        (async () => {
-            const tx = await db.getFirstAsync<any>('SELECT * FROM transactions WHERE id = ?', [transactionId!]);
-            if (!tx) {
-                showMessage(t('error'), t('transaction_not_found'));
-                router.back();
-                return;
-            }
-            setAmount(String(tx.amount));
-            setNote(tx.note ?? '');
-            setType(tx.type);
-            setSelectedCategory(tx.category);
-            setTxCurrency(tx.currency || currencyCode);
-            setDate(new Date(tx.date));
-        })();
-    }, [transactionId]);
+        if (!isEditing || !isFetched) return;
+        if (!existing) {
+            showMessage(t('error'), t('transaction_not_found'));
+            router.back();
+            return;
+        }
+        setAmount(String(existing.amount));
+        setNote(existing.note);
+        setType(existing.type);
+        setSelectedCategory(existing.category);
+        setTxCurrency(existing.currency);
+        setDate(new Date(existing.date));
+    }, [existing, isFetched]);
 
     // A new transaction follows the default currency from Profile.
     useEffect(() => {
@@ -93,35 +91,48 @@ export default function AddTransactionForm({ transactionId }: { transactionId?: 
             return;
         }
 
+        const input = {
+            amount: Math.round(parsedAmount * 100) / 100,
+            type,
+            category: selectedCategory,
+            date: date.getTime(),
+            note: note.trim(),
+            currency: txCurrency,
+        };
+
+        setSaving(true);
         try {
             if (isEditing) {
-                await db.runAsync(
-                    'UPDATE transactions SET amount = ?, type = ?, category = ?, note = ?, date = ?, currency = ? WHERE id = ?',
-                    [parsedAmount, type, selectedCategory, note.trim(), date.getTime(), txCurrency, transactionId!]
-                );
+                await updateTransaction(transactionId!, input);
+                await invalidateTransactions();
                 router.back();
             } else {
-                await db.runAsync(
-                    'INSERT INTO transactions (amount, type, category, date, note, currency) VALUES (?, ?, ?, ?, ?, ?)',
-                    [parsedAmount, type, selectedCategory, date.getTime(), note.trim(), txCurrency]
-                );
+                await createTransaction(input);
+                await invalidateTransactions();
                 resetForm();
                 router.navigate('/(tabs)');
             }
         } catch (error) {
             console.error(error);
-            showMessage(t('error'), t('save_failed'));
+            showMessage(t('error'), t(errorKey(error)));
+        } finally {
+            setSaving(false);
         }
     };
 
     const handleDelete = () => {
         confirmAction(t('delete_transaction_title'), t('delete_transaction_message'), t('delete'), t('cancel'), async () => {
-            await db.runAsync('DELETE FROM transactions WHERE id = ?', [transactionId!]);
-            router.back();
+            try {
+                await deleteTransaction(transactionId!);
+                await invalidateTransactions();
+                router.back();
+            } catch (error) {
+                showMessage(t('error'), t(errorKey(error)));
+            }
         });
     };
 
-    const canSave = !!amount && !!selectedCategory;
+    const canSave = !!amount && !!selectedCategory && !saving;
 
     return (
         <KeyboardAvoidingView
@@ -281,7 +292,7 @@ export default function AddTransactionForm({ transactionId }: { transactionId?: 
                         onPress={handleSave}
                         disabled={!canSave}
                     >
-                        <Text style={styles.saveButtonText}>{t('save')}</Text>
+                        {saving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveButtonText}>{t('save')}</Text>}
                     </TouchableOpacity>
                     {isEditing && (
                         <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>

@@ -15,7 +15,7 @@ export default function EditTransactionScreen() {
     return (
         <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
             <ScreenHeader title={t('edit_transaction')} />
-            <AddTransactionForm transactionId={Number(id)} />
+            <AddTransactionForm transactionId={id} />
         </SafeAreaView>
     );
 }

@@ -1,10 +1,13 @@
-import { getSetting, setSetting } from '@/db/database';
+import { useAuth } from '@/context/AuthContext';
+import { fetchSettings, saveSettings } from '@/lib/api';
+import { getLocalPref, setLocalPref } from '@/lib/localPrefs';
+import { keys } from '@/lib/queryClient';
 import { CURRENCIES, formatMoney, getCurrencyFlag, getCurrencySymbol } from '@/utils/money';
+import { useQuery } from '@tanstack/react-query';
 import { enUS, pl as plDate, type Locale } from 'date-fns/locale';
 import * as Localization from 'expo-localization';
-import { useSQLiteContext } from 'expo-sqlite';
 import { I18n } from 'i18n-js';
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import en from '../locales/en';
 import pl from '../locales/pl';
 
@@ -47,12 +50,31 @@ export const useLocalization = () => {
     return ctx;
 };
 
+// Language and default currency are stored per account (synced between devices)
+// and cached on the device, so the login screen already uses the right language.
 export const LocalizationProvider = ({ children }: { children: React.ReactNode }) => {
-    const db = useSQLiteContext();
+    const { user } = useAuth();
 
-    const [locale, setLocaleState] = useState(() => getSetting(db, 'locale') ?? deviceLocale());
+    const [locale, setLocaleState] = useState(() => getLocalPref('locale') ?? deviceLocale());
     // null = follow the language default until the user picks a currency explicitly.
-    const [storedCurrency, setStoredCurrency] = useState(() => getSetting(db, 'currency'));
+    const [storedCurrency, setStoredCurrency] = useState(() => getLocalPref('currency'));
+
+    const { data: settings } = useQuery({
+        queryKey: keys.settings,
+        queryFn: fetchSettings,
+        enabled: !!user,
+    });
+
+    useEffect(() => {
+        if (settings?.locale) {
+            setLocaleState(settings.locale);
+            setLocalPref('locale', settings.locale);
+        }
+        if (settings?.currency) {
+            setStoredCurrency(settings.currency);
+            setLocalPref('currency', settings.currency);
+        }
+    }, [settings]);
 
     const currencyCode = storedCurrency ?? defaultCurrencyFor(locale);
     i18n.locale = locale;
@@ -66,18 +88,25 @@ export const LocalizationProvider = ({ children }: { children: React.ReactNode }
         dateLocale: locale === 'pl' ? plDate : enUS,
         setLocale: (next: string) => {
             setLocaleState(next);
-            setSetting(db, 'locale', next);
+            setLocalPref('locale', next);
+            // Pin the current currency so switching language never changes how amounts are totalled.
+            if (!storedCurrency) {
+                setStoredCurrency(currencyCode);
+                setLocalPref('currency', currencyCode);
+            }
+            if (user) saveSettings(user.id, { locale: next, currency: currencyCode }).catch(console.error);
         },
         setCurrencyCode: (code: string) => {
             setStoredCurrency(code);
-            setSetting(db, 'currency', code);
+            setLocalPref('currency', code);
+            if (user) saveSettings(user.id, { currency: code }).catch(console.error);
         },
         languages: LANGUAGES,
         currencies: CURRENCIES,
         getCurrencySymbol,
         getCurrencyFlag,
         formatMoney: (amount, code) => formatMoney(amount, code || currencyCode),
-    }), [db, locale, currencyCode]);
+    }), [user, locale, currencyCode, storedCurrency]);
 
     return <LocalizationContext.Provider value={value}>{children}</LocalizationContext.Provider>;
 };

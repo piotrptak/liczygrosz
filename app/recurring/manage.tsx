@@ -4,33 +4,23 @@ import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { useLocalization } from '@/context/LocalizationContext';
 import { confirmAction, showMessage } from '@/utils/dialogs';
+import { createRecurring, deleteRecurring, fetchCategories, fetchRecurring, processRecurring } from '@/lib/api';
+import { invalidateTransactions, keys, queryClient } from '@/lib/queryClient';
+import { errorKey } from '@/utils/errors';
 import { parseAmount } from '@/utils/money';
-import { processRecurringTransactions } from '@/utils/recurringService';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { format, startOfDay } from 'date-fns';
-import { useSQLiteContext } from 'expo-sqlite';
-import React, { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { format, parseISO } from 'date-fns';
+import React, { useState } from 'react';
 import { FlatList, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-type RecurringRow = {
-    id: number;
-    amount: number;
-    type: 'income' | 'expense';
-    category: string;
-    frequency: 'weekly' | 'monthly';
-    next_due_date: number;
-    note: string | null;
-    currency: string | null;
-};
-
 export default function ManageRecurring() {
-    const db = useSQLiteContext();
     const { t, currencies, currencyCode, dateLocale, formatMoney } = useLocalization();
     const colors = Colors[useColorScheme() ?? 'light'];
 
-    const [recurringItems, setRecurringItems] = useState<RecurringRow[]>([]);
-    const [categories, setCategories] = useState<any[]>([]);
+    const { data: recurringItems = [] } = useQuery({ queryKey: keys.recurring, queryFn: fetchRecurring });
+    const { data: categories = [] } = useQuery({ queryKey: keys.categories, queryFn: fetchCategories });
     const [isModalVisible, setModalVisible] = useState(false);
 
     // Form State
@@ -43,14 +33,9 @@ export default function ManageRecurring() {
     const [startDate, setStartDate] = useState(new Date());
     const [noteError, setNoteError] = useState<string | null>(null);
 
-    useEffect(() => {
-        loadData();
-    }, []);
+    const [saving, setSaving] = useState(false);
 
-    const loadData = async () => {
-        setRecurringItems(await db.getAllAsync<RecurringRow>('SELECT * FROM recurring_transactions ORDER BY next_due_date'));
-        setCategories(await db.getAllAsync('SELECT * FROM categories ORDER BY name'));
-    };
+    const refresh = () => queryClient.invalidateQueries({ queryKey: keys.recurring });
 
     const openModal = () => {
         setAmount('');
@@ -73,26 +58,38 @@ export default function ManageRecurring() {
             return;
         }
 
+        setSaving(true);
         try {
-            const first = startOfDay(startDate).getTime();
-            await db.runAsync(
-                'INSERT INTO recurring_transactions (amount, type, category, frequency, next_due_date, start_date, note, currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                [parsedAmount, type, selectedCategory, frequency, first, first, note.trim(), txCurrency]
-            );
+            await createRecurring({
+                amount: Math.round(parsedAmount * 100) / 100,
+                type,
+                category: selectedCategory,
+                frequency,
+                start_date: startDate,
+                note: note.trim(),
+                currency: txCurrency,
+            });
             // Books the first occurrence right away when it is due today or in the past.
-            await processRecurringTransactions(db);
+            await processRecurring();
+            await invalidateTransactions();
             setModalVisible(false);
-            loadData();
+            refresh();
         } catch (error) {
             console.error(error);
-            showMessage(t('error'), t('save_failed'));
+            showMessage(t('error'), t(errorKey(error)));
+        } finally {
+            setSaving(false);
         }
     };
 
-    const handleDelete = (id: number) => {
+    const handleDelete = (id: string) => {
         confirmAction(t('delete_recurring_title'), t('delete_recurring_message'), t('delete'), t('cancel'), async () => {
-            await db.runAsync('DELETE FROM recurring_transactions WHERE id = ?', [id]);
-            loadData();
+            try {
+                await deleteRecurring(id);
+                refresh();
+            } catch (error) {
+                showMessage(t('error'), t(errorKey(error)));
+            }
         });
     };
 
@@ -106,7 +103,7 @@ export default function ManageRecurring() {
 
                 <FlatList
                     data={recurringItems}
-                    keyExtractor={(item) => item.id.toString()}
+                    keyExtractor={(item) => item.id}
                     ListEmptyComponent={<Text style={[styles.empty, { color: colors.textSecondary }]}>{t('no_recurring')}</Text>}
                     renderItem={({ item }) => (
                         <View style={[styles.card, { backgroundColor: colors.surface }]}>
@@ -116,7 +113,7 @@ export default function ManageRecurring() {
                                     {item.category} • {t(item.frequency)}
                                 </Text>
                                 <Text style={[styles.itemNote, { color: colors.textSecondary }]}>
-                                    {t('next_due', { date: format(new Date(item.next_due_date), 'd MMM yyyy', { locale: dateLocale }) })}
+                                    {t('next_due', { date: format(parseISO(item.next_due_date), 'd MMM yyyy', { locale: dateLocale }) })}
                                 </Text>
                             </View>
                             <View style={styles.cardRight}>
@@ -253,7 +250,7 @@ export default function ManageRecurring() {
                         <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.modalButton}>
                             <Text style={{ color: colors.text }}>{t('cancel')}</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity onPress={handleAdd} style={[styles.modalButton, { backgroundColor: colors.primary }]}>
+                        <TouchableOpacity onPress={handleAdd} disabled={saving} style={[styles.modalButton, { backgroundColor: colors.primary, opacity: saving ? 0.6 : 1 }]}>
                             <Text style={{ color: '#FFF', fontWeight: 'bold' }}>{t('save')}</Text>
                         </TouchableOpacity>
                     </View>

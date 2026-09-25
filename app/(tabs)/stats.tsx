@@ -1,69 +1,53 @@
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { useLocalization } from '@/context/LocalizationContext';
-import { useIsFocused } from '@react-navigation/native';
-import { useSQLiteContext } from 'expo-sqlite';
+import { fetchTransactions } from '@/lib/api';
+import { keys } from '@/lib/queryClient';
+import { useQuery } from '@tanstack/react-query';
 import { addMonths, differenceInCalendarMonths, endOfMonth, format, startOfMonth, subMonths } from 'date-fns';
-import React, { useEffect, useState } from 'react';
+import React, { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function StatsScreen() {
-    const db = useSQLiteContext();
-    const isFocused = useIsFocused();
     const { t, currency, currencyCode, dateLocale, formatMoney } = useLocalization();
     const colorScheme = useColorScheme();
     const colors = Colors[colorScheme ?? 'light'];
     const { width } = useWindowDimensions();
     const chartWidth = Math.min(width, 640) - 80; // screen padding 48 + card padding 32
 
-    const [chartData, setChartData] = useState<{ labels: string[], datasets: { data: number[] }[] } | null>(null);
-    const [monthNet, setMonthNet] = useState(0);
-
-    useEffect(() => {
-        if (isFocused) {
-            loadStats();
-        }
-    }, [isFocused, currencyCode, dateLocale]);
+    const now = new Date();
+    const firstMonth = startOfMonth(subMonths(now, 5));
+    const lastDay = endOfMonth(now);
+    const { data: transactions = [] } = useQuery({
+        queryKey: keys.transactionsRange(firstMonth, lastDay),
+        queryFn: () => fetchTransactions(firstMonth, lastDay),
+    });
 
     // Only the default currency is considered; amounts in other currencies are not convertible here.
-    const loadStats = async () => {
-        try {
-            const now = new Date();
-
-            const monthTotals = await db.getAllAsync<{ type: string; total: number }>(`
-                SELECT type, SUM(amount) as total FROM transactions
-                WHERE date >= ? AND date <= ? AND COALESCE(currency, ?) = ?
-                GROUP BY type
-            `, [startOfMonth(now).getTime(), endOfMonth(now).getTime(), currencyCode, currencyCode]);
-
-            const income = monthTotals.find(r => r.type === 'income')?.total ?? 0;
-            const expense = monthTotals.find(r => r.type === 'expense')?.total ?? 0;
-            setMonthNet(income - expense);
-
-            // Last 6 months of expenses
-            const firstMonth = startOfMonth(subMonths(now, 5));
-            const expenses = await db.getAllAsync<{ amount: number; date: number }>(`
-                SELECT amount, date FROM transactions
-                WHERE type = 'expense' AND date >= ? AND date <= ? AND COALESCE(currency, ?) = ?
-            `, [firstMonth.getTime(), endOfMonth(now).getTime(), currencyCode, currencyCode]);
-
-            const months = Array.from({ length: 6 }, (_, i) => addMonths(firstMonth, i));
-            const dataPoints = months.map(() => 0);
-            expenses.forEach(tx => {
-                const index = differenceInCalendarMonths(new Date(tx.date), firstMonth);
-                if (index >= 0 && index < 6) dataPoints[index] += tx.amount;
-            });
-
-            setChartData(dataPoints.some(v => v > 0) ? {
-                labels: months.map(m => format(m, 'LLL', { locale: dateLocale })),
-                datasets: [{ data: dataPoints }],
-            } : null);
-        } catch (e) {
-            console.error(e);
+    const { monthNet, chartData } = useMemo(() => {
+        const months = Array.from({ length: 6 }, (_, i) => addMonths(firstMonth, i));
+        const expenses = months.map(() => 0);
+        let income = 0;
+        let expense = 0;
+        for (const tx of transactions) {
+            if (tx.currency !== currencyCode) continue;
+            const index = differenceInCalendarMonths(new Date(tx.date), firstMonth);
+            if (tx.type === 'expense' && index >= 0 && index < 6) expenses[index] += tx.amount;
+            if (index === 5) {
+                if (tx.type === 'income') income += tx.amount;
+                else expense += tx.amount;
+            }
         }
-    };
+        return {
+            monthNet: income - expense,
+            chartData: expenses.some(v => v > 0) ? {
+                labels: months.map(m => format(m, 'LLL', { locale: dateLocale })),
+                datasets: [{ data: expenses }],
+            } : null,
+        };
+    }, [transactions, currencyCode, dateLocale, firstMonth.getTime()]);
 
     return (
         <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: colors.background }]}>

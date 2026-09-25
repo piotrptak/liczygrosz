@@ -3,37 +3,32 @@ import Colors from '@/constants/Colors';
 import { useLocalization } from '@/context/LocalizationContext';
 import ScreenHeader from '@/components/ui/ScreenHeader';
 import { confirmAction, showMessage } from '@/utils/dialogs';
+import { createCategory, deleteCategory, fetchCategories, type TxType } from '@/lib/api';
+import { keys, queryClient } from '@/lib/queryClient';
+import { errorKey } from '@/utils/errors';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useSQLiteContext } from 'expo-sqlite';
-import React, { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import React, { useState } from 'react';
 import { FlatList, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function ManageCategories() {
-    const db = useSQLiteContext();
     const { t } = useLocalization();
     const colorScheme = useColorScheme();
     const colors = Colors[colorScheme ?? 'light'];
 
-    const [categories, setCategories] = useState<any[]>([]);
+    const { data: categories = [] } = useQuery({ queryKey: keys.categories, queryFn: fetchCategories });
     const [isModalVisible, setModalVisible] = useState(false);
     const [newCategoryName, setNewCategoryName] = useState('');
     const [selectedIcon, setSelectedIcon] = useState('cart');
     const [selectedColor, setSelectedColor] = useState(colors.tint);
-    const [type, setType] = useState('expense');
+    const [type, setType] = useState<TxType>('expense');
 
     // Valid Ionicons names
     const icons = ['cart', 'home', 'car', 'restaurant', 'airplane', 'heart', 'game-controller', 'briefcase', 'school', 'gift', 'medical', 'paw', 'construct', 'barbell'];
     const palette = ['#FF3B30', '#FF9500', '#FFCC00', '#4CD964', '#5AC8FA', '#007AFF', '#5856D6', '#FF2D55', '#8E8E93', '#2C2C2E'];
 
-    useEffect(() => {
-        loadCategories();
-    }, []);
-
-    const loadCategories = async () => {
-        const result = await db.getAllAsync('SELECT * FROM categories ORDER BY id DESC');
-        setCategories(result);
-    };
+    const refresh = () => queryClient.invalidateQueries({ queryKey: keys.categories });
 
     const handleAddCategory = async () => {
         const name = newCategoryName.trim();
@@ -48,23 +43,24 @@ export default function ManageCategories() {
         }
 
         try {
-            await db.runAsync(
-                'INSERT INTO categories (name, type, icon, color) VALUES (?, ?, ?, ?)',
-                [name, type, selectedIcon, selectedColor]
-            );
+            await createCategory({ name, type, icon: selectedIcon, color: selectedColor });
             setModalVisible(false);
             setNewCategoryName('');
-            loadCategories();
+            refresh();
         } catch (error) {
             console.error(error);
-            showMessage(t('error'), t('save_failed'));
+            showMessage(t('error'), t(errorKey(error)));
         }
     };
 
-    const handleDelete = async (id: number) => {
+    const handleDelete = (id: string) => {
         confirmAction(t('delete_category_title'), t('delete_category_message'), t('delete'), t('cancel'), async () => {
-            await db.runAsync('DELETE FROM categories WHERE id = ?', [id]);
-            loadCategories();
+            try {
+                await deleteCategory(id);
+                refresh();
+            } catch (error) {
+                showMessage(t('error'), t(errorKey(error)));
+            }
         });
     };
 
@@ -82,7 +78,7 @@ export default function ManageCategories() {
 
             <FlatList
                 data={categories}
-                keyExtractor={(item) => item.id.toString()}
+                keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
                     <View style={[styles.card, { backgroundColor: colors.surface }]}>
                         <View style={[styles.iconContainer, { backgroundColor: item.color || colors.secondary }]}>
